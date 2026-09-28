@@ -816,7 +816,7 @@ header {
     <li class="nav-btn" data-view="view-timeline">Timeline</li>
     <li class="nav-btn" data-view="view-search">Search</li>
     <li class="nav-btn" data-view="view-faces">Face Gallery</li>
-    <li class="nav-btn" data-view="view-duplicates">Duplicates</li>
+    <li class="nav-btn" data-view="view-duplicates">Duplicates &amp; Cleanup</li>
     <li class="nav-btn" data-view="view-libraries">Albums & Drives</li>
     <li class="nav-btn" data-view="view-scanner">Analysis & Indexing</li>
   </ul>
@@ -954,33 +954,55 @@ header {
       </div>
     </div>
 
-    <!-- SMART MERGE SUGGESTIONS -->
-    <div class="merge-panel" id="mergeSuggestionsPanel" style="display: none;">
-      <div class="merge-panel-title">Smart Merge Suggestions <span class="merge-panel-count" id="mergeSuggestionsCount">0</span></div>
-      <div class="merge-suggestions-list" id="mergeSuggestionsList"></div>
-      <div style="margin-top: 10px; font-size: 11px; color: var(--text-muted);">Showing cluster pairs with centroid cosine similarity &gt;= 82%. Based on all face embeddings in each cluster, not just a cover photo. Confidence is discounted when a cluster is internally noisy.</div>
-    </div>
+
 
     <div class="faces-grid" id="facesGrid"></div>
   </div>
 
-  <!-- 5. DUPLICATES VIEW -->
+  <!-- 5. DUPLICATES & OPTIMIZATIONS VIEW -->
   <div class="view-container" id="view-duplicates">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-      <p style="font-size: 13px; color: var(--text-muted);">
-        SigLIP 2 visual embeddings detect burst shots, camera roll duplicates, and format copies (HEIC + JPG). Click any image to open it.
-      </p>
-      <div style="display: flex; align-items: center; gap: 10px;">
-        <label style="font-size: 12px; color: var(--text-muted);">Min Similarity:</label>
-        <input type="range" id="dupThresholdSlider" min="0.90" max="0.999" step="0.005" value="0.95"
-               style="width: 120px; accent-color: var(--accent);"
-               oninput="document.getElementById('dupThresholdLabel').textContent = parseFloat(this.value).toFixed(3); loadDuplicates()">
-        <span id="dupThresholdLabel" style="font-size: 12px; font-weight: 700; color: var(--accent); min-width: 40px;">0.950</span>
-        <button class="btn btn-primary" onclick="loadDuplicates()">Refresh</button>
-      </div>
+    <div style="display: flex; gap: 10px; margin-bottom: 20px; border-bottom: 1px solid var(--border); padding-bottom: 12px;">
+      <button class="btn btn-primary" id="subtabBtnDuplicates" onclick="switchOptimizationTab('duplicates')">Near-Duplicate Photos</button>
+      <button class="btn" id="subtabBtnFaceMerges" onclick="switchOptimizationTab('faces')">Smart Face Merges <span id="optMergeBadge" style="background:rgba(56,189,248,0.2); color:var(--accent); border:1px solid rgba(56,189,248,0.4); padding:1px 6px; border-radius:10px; font-size:10px; margin-left:6px; font-weight:700;">0</span></button>
     </div>
-    <div id="dupSummaryBar" style="display: none; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.35); border-radius: 8px; padding: 10px 16px; margin-bottom: 16px; font-size: 13px; color: var(--success); font-weight: 600;"></div>
-    <div id="duplicatesContainer"><div style="color: var(--text-muted); padding: 20px;">Loading...</div></div>
+
+    <!-- SUBVIEW A: DUPLICATE PHOTOS -->
+    <div id="subview-duplicates">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <p style="font-size: 13px; color: var(--text-muted);">
+          SigLIP 2 visual embeddings detect burst shots, camera roll duplicates, and format copies (HEIC + JPG). Click any image to open it.
+        </p>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <label style="font-size: 12px; color: var(--text-muted);">Min Similarity:</label>
+          <input type="range" id="dupThresholdSlider" min="0.90" max="0.999" step="0.005" value="0.95"
+                 style="width: 120px; accent-color: var(--accent);"
+                 oninput="document.getElementById('dupThresholdLabel').textContent = parseFloat(this.value).toFixed(3); loadDuplicates()">
+          <span id="dupThresholdLabel" style="font-size: 12px; font-weight: 700; color: var(--accent); min-width: 40px;">0.950</span>
+          <button class="btn btn-primary" onclick="loadDuplicates()">Refresh</button>
+        </div>
+      </div>
+      <div id="dupSummaryBar" style="display: none; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.35); border-radius: 8px; padding: 10px 16px; margin-bottom: 16px; font-size: 13px; color: var(--success); font-weight: 600;"></div>
+      <div id="duplicatesContainer"><div style="color: var(--text-muted); padding: 20px;">Loading duplicates...</div></div>
+    </div>
+
+    <!-- SUBVIEW B: SMART FACE MERGES -->
+    <div id="subview-faces" style="display: none;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <p style="font-size: 13px; color: var(--text-muted);">
+          Multi-metric ArcFace 512-D linkage with automatic gender guardrail to eliminate false cross-gender matches. High-confidence cluster merges only.
+        </p>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <label style="font-size: 12px; color: var(--text-muted);">Min Similarity:</label>
+          <input type="range" id="mergeThresholdSlider" min="0.80" max="0.98" step="0.01" value="0.86"
+                 style="width: 120px; accent-color: var(--accent);"
+                 oninput="document.getElementById('mergeThresholdLabel').textContent = parseFloat(this.value).toFixed(2); loadMergeSuggestions()">
+          <span id="mergeThresholdLabel" style="font-size: 12px; font-weight: 700; color: var(--accent); min-width: 40px;">0.86</span>
+          <button class="btn btn-primary" onclick="loadMergeSuggestions()">Refresh</button>
+        </div>
+      </div>
+      <div id="mergeSummaryBar" style="display: none; background: rgba(56,189,248,0.1); border: 1px solid rgba(56,189,248,0.35); border-radius: 8px; padding: 10px 16px; margin-bottom: 16px; font-size: 13px; color: var(--accent); font-weight: 600;"></div>
+      <div class="merge-suggestions-list" id="mergeSuggestionsList"><div style="color: var(--text-muted); padding: 20px;">Loading merge suggestions...</div></div>
+    </div>
   </div>
 
   <!-- 5. ALBUMS / LIBRARIES VIEW -->
@@ -1126,7 +1148,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
       'view-search': 'Semantic & Face Search',
       'view-faces': 'Face Gallery & Clustering',
       'view-libraries': 'Albums & Custom Drives',
-      'view-duplicates': 'Near-Duplicate Detection',
+      'view-duplicates': 'Duplicates & Clean Up Optimizations',
       'view-scanner': 'Engine Analysis & Progress'
     };
     document.getElementById('pageTitle').textContent = titles[target] || 'EveryImage';
@@ -1134,7 +1156,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     if (target === 'view-gallery') loadGallery();
     if (target === 'view-timeline') loadTimeline();
     if (target === 'view-faces') loadFaces();
-    if (target === 'view-duplicates') loadDuplicates();
+    if (target === 'view-duplicates') { if (currentOptSubTab === 'faces') loadMergeSuggestions(); else loadDuplicates(); loadMergeSuggestions(); }
     if (target === 'view-libraries') loadLibraries();
     if (target === 'view-scanner') updateScannerStatus();
   });
@@ -1638,7 +1660,6 @@ async function loadFaces() {
     }).join('');
 
     updateSelectionUI();
-    loadMergeSuggestions();
   } catch (e) {
     console.error(e);
   }
@@ -1800,7 +1821,31 @@ async function executeMultiMerge() {
   }
 }
 
-// 5b. Duplicates View
+// 5b. Duplicates & Optimizations View
+let currentOptSubTab = 'duplicates';
+
+function switchOptimizationTab(tab) {
+  currentOptSubTab = tab;
+  const btnDup = document.getElementById('subtabBtnDuplicates');
+  const btnFaces = document.getElementById('subtabBtnFaceMerges');
+  const viewDup = document.getElementById('subview-duplicates');
+  const viewFaces = document.getElementById('subview-faces');
+
+  if (tab === 'duplicates') {
+    btnDup.className = 'btn btn-primary';
+    btnFaces.className = 'btn';
+    viewDup.style.display = 'block';
+    viewFaces.style.display = 'none';
+    loadDuplicates();
+  } else {
+    btnDup.className = 'btn';
+    btnFaces.className = 'btn btn-primary';
+    viewDup.style.display = 'none';
+    viewFaces.style.display = 'block';
+    loadMergeSuggestions();
+  }
+}
+
 async function loadDuplicates() {
   const container = document.getElementById('duplicatesContainer');
   const summaryBar = document.getElementById('dupSummaryBar');
@@ -1849,7 +1894,6 @@ async function loadDuplicates() {
         </div>`;
     }).join('');
 
-    // Register all images so lightbox works
     data.groups.forEach(g => g.images.forEach(img => window.imagesStore.set(img.id, img)));
   } catch (e) {
     container.innerHTML = `<div style="color:var(--danger);">Error loading duplicates: ${e.message}</div>`;
@@ -1857,30 +1901,53 @@ async function loadDuplicates() {
 }
 
 async function loadMergeSuggestions() {
-  const panel = document.getElementById('mergeSuggestionsPanel');
   const list = document.getElementById('mergeSuggestionsList');
-  const countEl = document.getElementById('mergeSuggestionsCount');
-  if (!panel || !list) return;
+  const badge = document.getElementById('optMergeBadge');
+  const summaryBar = document.getElementById('mergeSummaryBar');
+  if (!list) return;
+
+  const thresholdInput = document.getElementById('mergeThresholdSlider');
+  const threshold = thresholdInput ? parseFloat(thresholdInput.value) : 0.86;
+
+  list.innerHTML = '<div style="color:var(--text-muted); padding:20px;">Analyzing face clusters with multi-metric ArcFace linkage and gender guardrail...</div>';
+  if (summaryBar) summaryBar.style.display = 'none';
 
   try {
-    const res = await fetch('/api/faces/merge-suggestions?min_similarity=0.82&limit=20');
+    const res = await fetch(`/api/faces/merge-suggestions?min_similarity=${threshold.toFixed(2)}&limit=50`);
     const data = await res.json();
+    const suggestions = data.suggestions || [];
 
-    if (!data.suggestions || data.suggestions.length === 0) {
-      panel.style.display = 'none';
+    if (badge) badge.textContent = suggestions.length;
+
+    if (suggestions.length === 0) {
+      list.innerHTML = '<div style="padding:40px; text-align:center; color:var(--text-muted);">No high-confidence face merge suggestions found at this threshold. Adjust the slider above to broaden sensitivity.</div>';
       return;
     }
 
-    countEl.textContent = data.suggestions.length;
-    list.innerHTML = data.suggestions.map(s => {
+    if (summaryBar) {
+      summaryBar.textContent = `Found ${suggestions.length} high-confidence face merge suggestions (all cross-gender matches automatically filtered out).`;
+      summaryBar.style.display = 'block';
+    }
+
+    list.innerHTML = suggestions.map(s => {
       const primary = s.primary_person;
       const candidate = s.candidate_person;
+
+      const pGenderBadge = primary.gender
+        ? `<span style="font-size:10px; font-weight:600; padding:1px 5px; border-radius:4px; margin-left:4px; background:${primary.gender === 'Female' ? 'rgba(236,72,153,0.18)' : 'rgba(59,130,246,0.18)'}; color:${primary.gender === 'Female' ? '#f472b6' : '#60a5fa'}; border:1px solid ${primary.gender === 'Female' ? 'rgba(236,72,153,0.35)' : 'rgba(59,130,246,0.35)'};">${primary.gender}</span>`
+        : '';
+      const cGenderBadge = candidate.gender
+        ? `<span style="font-size:10px; font-weight:600; padding:1px 5px; border-radius:4px; margin-left:4px; background:${candidate.gender === 'Female' ? 'rgba(236,72,153,0.18)' : 'rgba(59,130,246,0.18)'}; color:${candidate.gender === 'Female' ? '#f472b6' : '#60a5fa'}; border:1px solid ${candidate.gender === 'Female' ? 'rgba(236,72,153,0.35)' : 'rgba(59,130,246,0.35)'};">${candidate.gender}</span>`
+        : '';
+
+      const detailTitle = `Centroid: ${(s.centroid_similarity * 100).toFixed(1)}% | Pairwise Mean: ${(s.mean_pairwise_similarity * 100).toFixed(1)}% | Pairwise Max: ${(s.max_pairwise_similarity * 100).toFixed(1)}%`;
+
       return `
         <div class="merge-suggestion-row">
           <div class="merge-face-pair">
             <img class="merge-face-thumb" src="/thumbnails/${primary.cover_thumb || 'placeholder.webp'}" onerror="this.src='/thumbnails/placeholder.webp'">
             <div class="merge-face-info">
-              <div class="merge-face-name">${primary.name}</div>
+              <div class="merge-face-name">${primary.name} ${pGenderBadge}</div>
               <div class="merge-face-count">${primary.face_count} photos</div>
             </div>
           </div>
@@ -1888,23 +1955,21 @@ async function loadMergeSuggestions() {
           <div class="merge-face-pair">
             <img class="merge-face-thumb" src="/thumbnails/${candidate.cover_thumb || 'placeholder.webp'}" onerror="this.src='/thumbnails/placeholder.webp'">
             <div class="merge-face-info">
-              <div class="merge-face-name">${candidate.name}</div>
+              <div class="merge-face-name">${candidate.name} ${cGenderBadge}</div>
               <div class="merge-face-count">${candidate.face_count} photos</div>
             </div>
           </div>
-          <div class="merge-confidence" title="Centroid similarity: ${(s.centroid_similarity*100).toFixed(1)}% | Primary cluster quality: ${(s.primary_cohesion*100).toFixed(0)}% | Candidate cluster quality: ${(s.candidate_cohesion*100).toFixed(0)}%">${s.confidence_pct}%</div>
-          <button class="btn merge-btn" onclick="quickMergeSuggestion(${primary.id}, ${candidate.id}, '${primary.name.replace(/'/g, "\'")}')">Merge</button>
+          <div class="merge-confidence" title="${detailTitle}">${s.confidence_pct}% Match</div>
+          <button class="btn btn-primary merge-btn" onclick="quickMergeSuggestion(${primary.id}, ${candidate.id}, '${primary.name.replace(/'/g, "\'")}')">Merge</button>
         </div>`;
     }).join('');
-
-    panel.style.display = 'block';
   } catch (e) {
-    console.error('Failed to load merge suggestions:', e);
+    list.innerHTML = `<div style="color:var(--danger);">Error loading merge suggestions: ${e.message}</div>`;
   }
 }
 
 async function quickMergeSuggestion(targetId, sourceId, targetName) {
-  if (!confirm(`Merge the candidate into "${targetName}"?`)) return;
+  if (!confirm(`Merge the candidate face cluster into "${targetName}"?`)) return;
   try {
     const res = await fetch('/api/faces/merge', {
       method: 'POST',
@@ -1917,8 +1982,8 @@ async function quickMergeSuggestion(targetId, sourceId, targetName) {
       return;
     }
     showToast('Faces merged successfully', 'success');
-    await loadFaces();
     await loadMergeSuggestions();
+    if (typeof loadFaces === 'function') loadFaces();
   } catch (e) {
     showToast('Merge error: ' + e.message, 'error');
   }

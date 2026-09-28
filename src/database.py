@@ -961,62 +961,97 @@ def get_duplicate_groups(similarity_threshold: float = 0.96, limit: int = 50) ->
         conn.close()
 
 
-def get_face_merge_suggestions(min_similarity: float = 0.65, limit: int = 50) -> List[Dict[str, Any]]:
-    """
-    Legacy single-cover-face merge suggestion. Delegates to the centroid-based
-    implementation with a floor of 0.82 to avoid low-precision matches.
-    """
-    return get_face_merge_suggestions_centroid(
-        min_similarity=max(float(min_similarity), 0.82),
-        limit=limit
-    )
+_gender_session = None
+
+def _get_gender_session():
+    global _gender_session
+    if _gender_session is None:
+        model_path = cfg.MODELS_INSIGHTFACE / "models" / "buffalo_l" / "genderage.onnx"
+        if model_path.exists():
+            try:
+                import onnxruntime as ort
+                _gender_session = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
+            except Exception:
+                _gender_session = False
+        else:
+            _gender_session = False
+    return _gender_session if _gender_session is not False else None
 
 
-def get_face_merge_suggestions_centroid(min_similarity: float = 0.82, limit: int = 50) -> List[Dict[str, Any]]:
+def predict_face_gender(crop_thumb: Optional[str]) -> Tuple[Optional[str], float]:
     """
-    Centroid-based face cluster merge suggestions.
+    Runs buffalo_l genderage model on a representative face crop thumbnail.
+    Returns (gender_str, confidence_prob).
+    """
+    if not crop_thumb:
+        return None, 0.0
+    sess = _get_gender_session()
+    if sess is None:
+        return None, 0.0
+    try:
+        from PIL import Image
+        thumb_path = cfg.CACHE_DIR / "thumbnails" / crop_thumb
+        if not thumb_path.exists():
+            return None, 0.0
+        im = Image.open(thumb_path).convert("RGB").resize((96, 96), Image.Resampling.BILINEAR)
+        arr = np.array(im, dtype=np.float32)[:, :, ::-1]  # RGB to BGR
+        arr = np.transpose(arr, (2, 0, 1))[np.newaxis, ...]  # (1, 3, 96, 96)
+        out = sess.run(["fc1"], {"data": arr})[0][0]
+        f_logit, m_logit = float(out[0]), float(out[1])
+        is_male = m_logit > f_logit
+        max_l = max(f_logit, m_logit)
+        prob = float(np.exp(max_l) / (np.exp(f_logit) + np.exp(m_logit)))
+        return ("Male" if is_male else "Female"), prob
+    except Exception:
+        return None, 0.0
+
+
+def get_face_merge_suggestions(min_similarity: float = 0.86, limit: int = 50) -> List[Dict[str, Any]]:
+    """
+    Legacy alias for get_face_merge_suggestions_centroid.
+    """
+    return get_face_merge_suggestions_centroid(min_similarity=min_similarity, limit=limit)
+
+
+def get_face_merge_suggestions_centroid(min_similarity: float = 0.86, limit: int = 50) -> List[Dict[str, Any]]:
+    """
+    High-precision face cluster merge suggestions with multi-metric linkage validation
+    and an automated cross-gender guardrail.
 
     Algorithm:
-    1. For every person cluster, load all ArcFace 512-D unit-norm embeddings from vec_faces.
-    2. Compute the cluster centroid as the L2-normalized mean of all embeddings.
-    3. Compute intra-cluster cohesion (mean pairwise cosine sim up to 10 faces) as a quality weight.
-    4. For every unique pair of clusters, compute centroid-to-centroid cosine similarity.
-    5. Effective confidence = centroid_sim * (0.5 + 0.5 * min_cluster_cohesion).
-       This down-ranks suggestions where one cluster is internally noisy.
-    6. Return pairs where centroid cosine sim >= min_similarity, ranked descending.
-
-    Why centroid is better than single-cover-face KNN:
-    - A single cover face can be a pose/lighting outlier that misrepresents the cluster.
-    - Centroid averages out noise; two clusters of the same person consistently show
-      centroid cosine sim > 0.85 for ArcFace w2_r100 (buffalo_l).
-    - The threshold 0.82 on centroid similarity corresponds to very high precision on
-      real-world personal photo library data with the InsightFace buffalo_l model.
-
-    No re-indexing required -- uses the existing stored 512-D embeddings in vec_faces.
+    1. Pre-fetches the actual best face for each person cluster using:
+       (SELECT crop_thumb FROM faces WHERE person_id = p.id ORDER BY det_score DESC LIMIT 1)
+       Ensures thumbnails always display the exact representative face crop of that person.
+    2. Loads all ArcFace 512-D unit-norm embeddings per cluster and computes normalized centroids.
+    3. Analyzes representative face crop using InsightFace buffalo_l genderage model.
+    4. Centroid gate: requires centroid-to-centroid cosine similarity >= min_similarity.
+    5. Gender guardrail: if both faces have confident gender classifications (>= 60%)
+       and are opposite genders (Male vs Female), the suggestion is rejected immediately.
+    6. Cross-cluster pairwise linkage validation:
+       - max pairwise similarity >= 0.87 (the two clusters must have at least one very strong match)
+       - mean pairwise similarity >= 0.82 (the clusters must be consistently similar on average)
+       - 10th percentile pairwise similarity >= 0.70 (prevents large cluster hubness drift)
+    7. Confidence weighting: composite score combining centroid, mean, and max pairwise similarities.
     """
     conn = get_connection()
     try:
         cur = conn.cursor()
 
-        # Load all person metadata. Cap at 300 for performance.
         cur.execute("""
             SELECT p.id as person_id, p.name,
-                   COALESCE(p.cover_face_id, MIN(f.id)) as cover_face_id,
-                   COUNT(f.id) as face_count,
-                   MIN(i.header_hash) as cover_hash
+                   (SELECT f.crop_thumb FROM faces f WHERE f.person_id = p.id ORDER BY f.det_score DESC LIMIT 1) as best_thumb,
+                   COUNT(f.id) as face_count
             FROM persons p
             JOIN faces f ON p.id = f.person_id
-            JOIN images i ON f.image_id = i.id
             GROUP BY p.id
             ORDER BY face_count DESC, p.id ASC
-            LIMIT 300
+            LIMIT 250
         """)
         persons = [dict(r) for r in cur.fetchall()]
         if len(persons) < 2:
             return []
 
-        # Build centroid for each cluster
-        centroids: List[Dict] = []
+        clusters: List[Dict[str, Any]] = []
         for p in persons:
             pid = p["person_id"]
             cur.execute("""
@@ -1041,60 +1076,73 @@ def get_face_merge_suggestions_centroid(min_similarity: float = 0.82, limit: int
             if not embs:
                 continue
 
-            stack = np.stack(embs)  # (N, 512)
+            stack = np.stack(embs)
             mean_emb = stack.mean(axis=0)
-            mean_norm = np.linalg.norm(mean_emb)
-            if mean_norm < 1e-6:
+            norm_mean = np.linalg.norm(mean_emb)
+            if norm_mean < 1e-6:
                 continue
-            centroid = (mean_emb / mean_norm).astype(np.float32)
+            centroid = (mean_emb / norm_mean).astype(np.float32)
 
-            # Intra-cluster cohesion: mean pairwise cosine similarity (up to first 10 faces)
-            if len(embs) >= 2:
-                sub = stack[:min(len(embs), 10)]
-                gram_intra = sub @ sub.T
-                iu = np.triu_indices(len(sub), k=1)
-                cohesion = float(gram_intra[iu].mean())
-            else:
-                cohesion = 1.0  # singleton: treat as perfectly coherent
+            best_thumb = p["best_thumb"] or "placeholder.webp"
+            gender, gender_conf = predict_face_gender(best_thumb)
 
-            centroids.append({
+            clusters.append({
                 "person_id": pid,
                 "name": p["name"],
                 "face_count": p["face_count"],
-                "cover_hash": p["cover_hash"],
+                "thumb": best_thumb,
+                "embs": stack,
                 "centroid": centroid,
-                "cohesion": cohesion,
+                "gender": gender,
+                "gender_conf": gender_conf,
             })
 
-        if len(centroids) < 2:
+        if len(clusters) < 2:
             return []
 
-        # All-pairs centroid cosine similarity via one matrix multiply
-        cmat = np.stack([c["centroid"] for c in centroids])  # (M, 512)
-        gram = cmat @ cmat.T  # (M, M)
+        # All-pairs centroid cosine similarity
+        cmat = np.stack([c["centroid"] for c in clusters])  # (M, 512)
+        gram = cmat @ cmat.T
 
         suggestions = []
         seen_pairs: set = set()
-        n_c = len(centroids)
+        n_c = len(clusters)
 
         for i in range(n_c):
             for j in range(i + 1, n_c):
-                sim = float(gram[i, j])
-                if sim < min_similarity:
+                c_sim = float(gram[i, j])
+                if c_sim < min_similarity:
                     continue
-                ci = centroids[i]
-                cj = centroids[j]
+
+                ci = clusters[i]
+                cj = clusters[j]
+
+                # 1. Gender guardrail: reject opposite genders if both >= 60% confidence
+                if ci["gender"] and cj["gender"] and ci["gender_conf"] >= 0.60 and cj["gender_conf"] >= 0.60:
+                    if ci["gender"] != cj["gender"]:
+                        continue
+
+                # 2. Cross-cluster pairwise linkage validation
+                cross = ci["embs"] @ cj["embs"].T  # (N_i, N_j)
+                max_sim = float(cross.max())
+                mean_sim = float(cross.mean())
+                p10_sim = float(np.percentile(cross, 10))
+
+                # Rigorous same-person requirements
+                if max_sim < 0.87 or mean_sim < 0.82 or p10_sim < 0.70:
+                    continue
+
                 pair = (min(ci["person_id"], cj["person_id"]),
                         max(ci["person_id"], cj["person_id"]))
                 if pair in seen_pairs:
                     continue
                 seen_pairs.add(pair)
 
-                # Effective confidence discounts noisy clusters
-                min_cohesion = min(ci["cohesion"], cj["cohesion"])
-                effective_conf = sim * (0.5 + 0.5 * min_cohesion)
+                # Composite confidence score
+                composite_score = 0.45 * c_sim + 0.35 * mean_sim + 0.20 * max_sim
+                conf_pct = int(composite_score * 100)
 
-                # Primary = named or larger cluster
+                # Primary = named person or larger cluster
                 ci_default = ci["name"].startswith("Person ")
                 cj_default = cj["name"].startswith("Person ")
                 if not ci_default and cj_default:
@@ -1111,23 +1159,27 @@ def get_face_merge_suggestions_centroid(min_similarity: float = 0.82, limit: int
                         "id": keep["person_id"],
                         "name": keep["name"],
                         "face_count": keep["face_count"],
-                        "cover_thumb": f"faces/{keep['cover_hash']}_0.webp",
+                        "cover_thumb": keep["thumb"],
+                        "gender": keep["gender"],
                     },
                     "candidate_person": {
                         "id": merge["person_id"],
                         "name": merge["name"],
                         "face_count": merge["face_count"],
-                        "cover_thumb": f"faces/{merge['cover_hash']}_0.webp",
+                        "cover_thumb": merge["thumb"],
+                        "gender": merge["gender"],
                     },
-                    "centroid_similarity": round(sim, 4),
-                    "similarity": round(sim, 4),
-                    "confidence_pct": int(effective_conf * 100),
-                    "primary_cohesion": round(keep["cohesion"], 3),
-                    "candidate_cohesion": round(merge["cohesion"], 3),
+                    "similarity": round(c_sim, 4),
+                    "centroid_similarity": round(c_sim, 4),
+                    "mean_pairwise_similarity": round(mean_sim, 4),
+                    "max_pairwise_similarity": round(max_sim, 4),
+                    "min_pairwise_similarity": round(float(cross.min()), 4),
+                    "confidence_pct": conf_pct,
                 })
 
-        suggestions.sort(key=lambda x: x["similarity"], reverse=True)
+        suggestions.sort(key=lambda x: (x["confidence_pct"], x["similarity"]), reverse=True)
         return suggestions[:limit]
     finally:
         conn.close()
+
 

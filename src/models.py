@@ -110,10 +110,11 @@ class SiglipEngine:
             self._text_gate_emb = self.encode_text(prompt)
         return self._text_gate_emb
 
-    def is_text_candidate(self, image_emb: np.ndarray, threshold: float = 0.015) -> bool:
+    def is_text_candidate(self, image_emb: np.ndarray, threshold: float = 0.075) -> bool:
         gate_emb = self.get_text_gate_embedding()
         sim = float(np.dot(image_emb, gate_emb))
         return sim >= threshold
+
 
 class FaceEngine:
     _instance = None

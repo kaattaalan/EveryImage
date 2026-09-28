@@ -1,0 +1,47 @@
+# Environment and dependencies
+.venv/
+venv/
+ENV/
+env/
+
+# Large model binaries and assets
+models/
+*.onnx
+*.onnx.data
+scratch/siglip*
+scratch/siglip2_tokenizer/
+
+# Database and SQLite vector files
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Cache and temporary folders
+cache/
+.cache/
+temp/
+tmp/
+*.tmp
+
+# Playwright artifacts and test screenshots
+.playwright/
+.playwright-cli/
+scratch/test_screenshots/
+
+# Python compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

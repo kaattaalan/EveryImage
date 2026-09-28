@@ -1,0 +1,1757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EveryImage - Desktop Image Indexer</title>
+<style>
+:root {
+  --bg-primary: #0b0f19;
+  --bg-secondary: #131b2e;
+  --bg-card: #1a243b;
+  --bg-card-hover: #22304e;
+  --border: #283756;
+  --border-focus: #38bdf8;
+  --text-main: #f1f5f9;
+  --text-muted: #94a3b8;
+  --accent: #38bdf8;
+  --accent-hover: #0ea5e9;
+  --success: #10b981;
+  --danger: #ef4444;
+  --danger-hover: #dc2626;
+  --warning: #f59e0b;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-main);
+  height: 100vh;
+  display: flex;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Sidebar */
+aside {
+  width: 230px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.brand {
+  padding: 18px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.brand-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, var(--accent), #6366f1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 14px;
+  color: #fff;
+}
+.brand-name {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  color: var(--text-main);
+}
+
+.nav-links {
+  list-style: none;
+  padding: 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex-grow: 1;
+  overflow-y: auto;
+}
+.nav-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+}
+.nav-btn:hover {
+  background: var(--bg-card);
+  color: var(--text-main);
+}
+.nav-btn.active {
+  background: var(--bg-card);
+  color: var(--accent);
+  border-color: var(--border);
+  font-weight: 600;
+}
+
+.sidebar-status {
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background: #0d1322;
+}
+.status-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.status-dot.active { background: var(--success); }
+.status-dot.scanning { background: var(--warning); animation: pulse 1.5s infinite; }
+@keyframes pulse {
+  0% { opacity: 0.4; }
+  50% { opacity: 1; }
+  100% { opacity: 0.4; }
+}
+
+/* Main Content Area */
+main {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+header {
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-secondary);
+}
+.page-title {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.btn {
+  background: var(--bg-card);
+  color: var(--text-main);
+  border: 1px solid var(--border);
+  padding: 7px 13px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+.btn:hover { background: var(--bg-card-hover); border-color: var(--accent); }
+.btn-primary { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-danger { background: var(--danger); color: #fff; border-color: var(--danger); }
+.btn-danger:hover { background: var(--danger-hover); }
+
+/* View Containers */
+.view-container {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+  display: none;
+}
+.view-container.active { display: block; }
+
+/* Filter Bar for Gallery & Timeline */
+.toolbar-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.select-input {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  outline: none;
+}
+
+/* Gallery Grid */
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 14px;
+}
+.img-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.15s, border-color 0.15s;
+  cursor: pointer;
+}
+.img-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+.img-card img {
+  width: 100%;
+  height: 160px;
+  object-fit: cover;
+  background: #000;
+  display: block;
+}
+.img-card-info {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-grow: 1;
+  justify-content: space-between;
+}
+.img-title {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.img-meta-row {
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  justify-content: space-between;
+}
+.img-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+.img-actions button {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 11px;
+}
+
+/* Timeline Layout */
+.timeline-wrapper {
+  display: flex;
+  gap: 20px;
+  position: relative;
+}
+.timeline-content {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+.timeline-scrubber {
+  width: 80px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-left: 1px solid var(--border);
+  padding-left: 12px;
+}
+.scrubber-item {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+.scrubber-item:hover { color: var(--accent); }
+.timeline-section-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.timeline-badge {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+/* Search View */
+.search-bar-wrap {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.search-input {
+  flex-grow: 1;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--text-main);
+  outline: none;
+}
+.search-input:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+}
+.chips-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.chip {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.img-sim-bar {
+  background: var(--border);
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.img-sim-fill {
+  background: var(--accent);
+  height: 100%;
+}
+
+/* Face Gallery View */
+.faces-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 14px;
+}
+.face-person-card {
+  position: relative;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.face-person-card:hover {
+  border-color: var(--accent);
+}
+.face-person-card.selected {
+  border-color: var(--accent);
+  background: var(--bg-card);
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.face-select-check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.face-select-check::after {
+  content: "";
+  display: none;
+  width: 4px;
+  height: 8px;
+  border: solid #000;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+  margin-bottom: 2px;
+}
+.face-person-card.selected .face-select-check {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.face-person-card.selected .face-select-check::after {
+  display: block;
+}
+
+.face-cover {
+  width: 88px;
+  height: 88px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--border);
+  margin-bottom: 8px;
+  background: #000;
+}
+.face-name-input {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-main);
+  font-weight: 600;
+  font-size: 13px;
+  text-align: center;
+  border-radius: 4px;
+  padding: 2px 4px;
+  width: 100%;
+  margin-bottom: 4px;
+}
+.face-name-input:focus {
+  background: var(--bg-card);
+  border-color: var(--accent);
+  outline: none;
+}
+.face-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+/* Modals */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.75);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.modal-overlay.active { display: flex; }
+.modal-box {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  width: 460px;
+  max-width: 90vw;
+  padding: 24px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6);
+}
+.modal-title { font-size: 15px; font-weight: 700; margin-bottom: 14px; }
+.modal-field { margin-bottom: 14px; }
+.modal-label { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; display: block; }
+.modal-select {
+  width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  border-radius: 6px;
+  color: var(--text-main);
+  outline: none;
+}
+
+/* Lightbox Modal */
+.lightbox-modal {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(5, 8, 15, 0.92);
+  display: none;
+  flex-direction: column;
+  z-index: 2000;
+}
+.lightbox-modal.active { display: flex; }
+.lightbox-header {
+  padding: 12px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+.lightbox-body {
+  flex-grow: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  overflow: hidden;
+}
+.lightbox-img {
+  max-width: 90%;
+  max-height: 80vh;
+  object-fit: contain;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+.lightbox-footer {
+  padding: 12px 24px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Progress & Scanner */
+.progress-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 20px;
+}
+.progress-bar-bg {
+  background: var(--border);
+  height: 12px;
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 14px 0;
+}
+.progress-bar-fill {
+  background: linear-gradient(90deg, var(--accent), var(--success));
+  height: 100%;
+  width: 0%;
+  transition: width 0.3s ease;
+}
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-top: 14px;
+}
+.stat-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  padding: 12px;
+  border-radius: 8px;
+}
+.stat-val { font-size: 18px; font-weight: 700; color: var(--accent); }
+.stat-lbl { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+/* Library List */
+.lib-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.lib-item {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  padding: 12px 16px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.lib-path { font-size: 13px; font-weight: 500; word-break: break-all; }
+.lib-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+/* Toast Notifications */
+.toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 9999;
+  pointer-events: none;
+}
+.toast {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  pointer-events: auto;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  transform: translateY(10px);
+  opacity: 0;
+}
+.toast.show {
+  transform: translateY(0);
+  opacity: 1;
+}
+.toast-success { border-left: 4px solid var(--success); }
+.toast-error { border-left: 4px solid var(--danger); }
+.toast-info { border-left: 4px solid var(--accent); }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside>
+  <div class="brand">
+    <div class="brand-logo">EI</div>
+    <div class="brand-name">EveryImage</div>
+  </div>
+
+  <ul class="nav-links">
+    <li class="nav-btn active" data-view="view-gallery">All Photos</li>
+    <li class="nav-btn" data-view="view-timeline">Timeline</li>
+    <li class="nav-btn" data-view="view-search">Search</li>
+    <li class="nav-btn" data-view="view-faces">Face Gallery</li>
+    <li class="nav-btn" data-view="view-libraries">Albums & Drives</li>
+    <li class="nav-btn" data-view="view-scanner">Analysis & Indexing</li>
+  </ul>
+
+  <div class="sidebar-status">
+    <div class="status-pill">
+      <div class="status-dot" id="sidebarDot"></div>
+      <span id="sidebarStatusText">Ready</span>
+    </div>
+    <div style="font-size: 11px; color: var(--text-muted);" id="sidebarCountText">0 Images Indexed</div>
+  </div>
+</aside>
+
+<!-- Main Container -->
+<main>
+  <header>
+    <div class="page-title" id="pageTitle">All Photos</div>
+  </header>
+
+  <!-- 1. ALL PHOTOS / REGULAR GALLERY VIEW -->
+  <div class="view-container active" id="view-gallery">
+    <div class="toolbar-bar">
+      <div class="toolbar-group">
+        <label style="font-size: 12px; color: var(--text-muted);">Album:</label>
+        <select class="select-input" id="galleryLibFilter" onchange="loadGallery()"></select>
+
+        <label style="font-size: 12px; color: var(--text-muted); margin-left: 6px;">Sort:</label>
+        <select class="select-input" id="gallerySort" onchange="loadGallery()">
+          <option value="date_desc">Date (Newest First)</option>
+          <option value="date_asc">Date (Oldest First)</option>
+          <option value="name_asc">Name (A-Z)</option>
+          <option value="size_desc">File Size (Largest)</option>
+        </select>
+      </div>
+      <div style="font-size: 12px; color: var(--text-muted);" id="galleryCountLabel">0 photos</div>
+    </div>
+
+    <div class="gallery-grid" id="regularGalleryGrid"></div>
+  </div>
+
+  <!-- 2. TIMELINE VIEW -->
+  <div class="view-container" id="view-timeline">
+    <div class="toolbar-bar">
+      <div class="toolbar-group">
+        <label style="font-size: 12px; color: var(--text-muted);">Album:</label>
+        <select class="select-input" id="timelineLibFilter" onchange="loadTimeline()"></select>
+      </div>
+      <div style="font-size: 12px; color: var(--text-muted);" id="timelineTotalLabel">Chronological Timeline</div>
+    </div>
+
+    <div class="timeline-wrapper">
+      <div class="timeline-content" id="timelineContent"></div>
+      <div class="timeline-scrubber" id="timelineScrubber"></div>
+    </div>
+  </div>
+
+  <!-- 3. SEARCH VIEW -->
+  <div class="view-container" id="view-search">
+    <div class="search-bar-wrap">
+      <input type="text" class="search-input" id="searchInput" placeholder="Visual search (e.g. 'car', 'sunset') or in-photo text in quotes (e.g. '&quot;shawaya&quot;', '&quot;invoice&quot;')..." oninput="if(!this.value.trim()) activePersonId = null;" onkeydown="if(event.key==='Enter') executeSearch()">
+      <button class="btn btn-primary" onclick="executeSearch()">Search</button>
+      <button class="btn" id="btnToggleFilters" onclick="toggleSearchFilters()">Filters</button>
+    </div>
+    <div style="font-size: 11px; color: var(--text-muted); margin: 6px 0 14px 4px;">
+      Tip: Put terms in <code style="background:var(--bg-secondary); padding:2px 5px; border-radius:4px; border:1px solid var(--border);">&quot;quotes&quot;</code> to search text inside photos (OCR). Prefix with <code style="background:var(--bg-secondary); padding:2px 5px; border-radius:4px; border:1px solid var(--border);">-</code> to exclude concepts (e.g. <code style="background:var(--bg-secondary); padding:2px 5px; border-radius:4px; border:1px solid var(--border);">car -red</code> or <code style="background:var(--bg-secondary); padding:2px 5px; border-radius:4px; border:1px solid var(--border);">receipt -&quot;shawaya&quot;</code>).
+    </div>
+
+    <!-- ADVANCED SEARCH FILTERS -->
+    <div id="searchFiltersBox" style="background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 14px 18px; margin-bottom: 16px;">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; align-items: flex-end;">
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <label style="font-size: 11px; color: var(--text-muted);">Score Threshold (Min Similarity):</label>
+            <span id="scoreValLabel" style="font-size: 12px; font-weight: 700; color: var(--accent);">0.075</span>
+          </div>
+          <input type="range" id="searchScoreSlider" min="0.00" max="0.20" step="0.005" value="0.075"
+                 style="width: 100%; accent-color: var(--accent); cursor: pointer;"
+                 oninput="onScoreSliderInput(this.value)">
+          <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-top: 2px;">
+            <span>0.00 (All)</span>
+            <span>0.05 (Broad)</span>
+            <span>0.075 (Default)</span>
+            <span>0.10+ (Strict)</span>
+          </div>
+        </div>
+
+        <div>
+          <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">From Date:</label>
+          <input type="date" class="select-input" id="searchFromDate" style="width: 100%;" onchange="executeSearch()">
+        </div>
+
+        <div>
+          <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">To Date:</label>
+          <input type="date" class="select-input" id="searchToDate" style="width: 100%;" onchange="executeSearch()">
+        </div>
+
+        <div>
+          <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Album Filter:</label>
+          <select class="select-input" id="searchLibFilter" style="width: 100%;" onchange="executeSearch()"></select>
+        </div>
+
+        <div>
+          <button class="btn" style="width: 100%;" onclick="resetSearchFilters()">Reset Filters</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- DYNAMIC COMMON TAGS & SUGGESTIONS -->
+    <div class="chips-row" id="searchChipsRow"></div>
+
+    <div id="searchMeta" style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;"></div>
+    <div class="gallery-grid" id="searchResultsGrid"></div>
+  </div>
+
+  <!-- 4. FACE GALLERY VIEW -->
+  <div class="view-container" id="view-faces">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <p style="font-size: 13px; color: var(--text-muted);">
+        InsightFace buffalo_l automatically clusters detected faces. Click on a card or Ctrl+click multiple faces to select and merge them. Renaming two faces to the same name automatically merges them.
+      </p>
+    </div>
+
+    <!-- MULTI-SELECT MERGE ACTION BAR -->
+    <div id="faceSelectionBar" style="display: none; background: #1a2744; border: 1px solid var(--accent); border-radius: 8px; padding: 12px 18px; margin-bottom: 18px; align-items: center; justify-content: space-between;">
+      <div style="font-size: 13px; font-weight: 600; color: var(--text-main);">
+        <span id="selectedFacesCount" style="color: var(--accent); font-weight: 700;">0</span> faces selected for merging
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <button class="btn btn-primary" onclick="openMultiMergeModal()">Merge Selected Faces</button>
+        <button class="btn" onclick="clearFaceSelection()">Deselect All</button>
+      </div>
+    </div>
+
+    <div class="faces-grid" id="facesGrid"></div>
+  </div>
+
+  <!-- 5. ALBUMS / LIBRARIES VIEW -->
+  <div class="view-container" id="view-libraries">
+    <div style="background: var(--bg-secondary); border: 1px solid var(--border); padding: 18px; border-radius: 8px; margin-bottom: 20px;">
+      <div style="font-size: 14px; font-weight: 600; margin-bottom: 10px;">Add Library Folder or External Drive</div>
+      <div style="display: flex; gap: 10px;">
+        <input type="text" class="search-input" id="newLibInput" placeholder="Enter absolute folder path (e.g. D:\Photos or E:\Workspace\EveryImage\data\lfw_home)">
+        <button class="btn btn-primary" onclick="addLibrary()">Add Album</button>
+      </div>
+    </div>
+
+    <div style="font-size: 14px; font-weight: 600; margin-bottom: 10px;">Configured Libraries</div>
+    <div class="lib-list" id="librariesList"></div>
+  </div>
+
+  <!-- 6. ANALYSIS & INDEXING VIEW -->
+  <div class="view-container" id="view-scanner">
+    <div class="progress-card">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <div style="font-size: 16px; font-weight: 700;" id="scanStatusTitle">Engine Idle</div>
+          <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;" id="scanCurrentFile">Waiting to scan...</div>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-primary" id="btnScanStart" onclick="startScan()">Start Analysis</button>
+          <button class="btn btn-danger" id="btnScanStop" style="display:none;" onclick="stopScan()">Stop Analysis</button>
+          <button class="btn" id="btnScanRebuild" style="border-color: rgba(239,68,68,0.4); color: #f87171;" onclick="confirmClearAndRebuild()">Clear & Full Rebuild</button>
+        </div>
+      </div>
+
+      <div class="progress-bar-bg">
+        <div class="progress-bar-fill" id="scanProgressBar"></div>
+      </div>
+      <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted);">
+        <span id="scanPercentLabel">0.0% Complete</span>
+        <span id="scanSpeedLabel">0.0 images/sec</span>
+      </div>
+
+      <div class="stats-grid">
+        <div class="stat-box">
+          <div class="stat-val" id="statScanned">0</div>
+          <div class="stat-lbl">Files Scanned</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="statTagged">0</div>
+          <div class="stat-lbl">Images Tagged</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="statFaces">0</div>
+          <div class="stat-lbl">Faces Detected</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="statElapsed">0s</div>
+          <div class="stat-lbl">Elapsed Time</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- Lightbox Modal -->
+<div class="lightbox-modal" id="lightboxModal">
+  <div class="lightbox-header">
+    <div style="font-weight: 600; font-size: 14px;" id="lightboxTitle">Photo Details</div>
+    <button class="btn" onclick="closeLightbox()">Close</button>
+  </div>
+  <div class="lightbox-body">
+    <img class="lightbox-img" id="lightboxImg" src="">
+  </div>
+  <div id="lightboxFacesSection" style="display: none; padding: 10px 24px; background: #0d1527; border-top: 1px solid var(--border);">
+    <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 6px;">
+      Detected Faces (<span id="lightboxFaceCount">0</span>):
+    </div>
+    <div id="lightboxFacesRow" style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
+  </div>
+  <div id="lightboxOcrSection" style="display: none; padding: 10px 24px; background: #0c1829; border-top: 1px solid var(--border);">
+    <div style="font-size: 11px; font-weight: 700; color: var(--accent); text-transform: uppercase; margin-bottom: 6px; display:flex; justify-content:space-between; align-items:center;">
+      <span>Extracted Text (GPU OCR):</span>
+      <button class="btn" style="padding: 2px 8px; font-size: 10px;" onclick="copyLightboxOcrText()">Copy Text</button>
+    </div>
+    <div id="lightboxOcrText" style="font-size: 12px; color: var(--text-main); font-family: monospace; background: rgba(0,0,0,0.3); padding: 8px 12px; border-radius: 4px; max-height: 80px; overflow-y: auto; user-select: text;"></div>
+  </div>
+  <div class="lightbox-footer">
+    <div>
+      <div id="lightboxMeta">Date: - | Dimensions: -</div>
+      <div id="lightboxResBadge" style="font-size: 11px; margin-top: 3px; color: var(--accent);">Loading Full Res...</div>
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <button class="btn btn-primary" id="btnLightboxOpen">View Full Resolution</button>
+      <button class="btn" id="btnLightboxApp">Open in System Viewer</button>
+      <button class="btn" id="btnLightboxFolder">Show in Explorer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Multi-Merge Faces Modal -->
+<div class="modal-overlay" id="multiMergeModal">
+  <div class="modal-box">
+    <div class="modal-title">Merge Selected Face Identities</div>
+    <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
+      Choose which identity name to keep as the primary profile, or enter a unified name below:
+    </p>
+    <div id="multiMergeOptionsList" style="max-height: 200px; overflow-y: auto; margin-bottom: 14px;"></div>
+    <div class="modal-field">
+      <label class="modal-label">Unified Name:</label>
+      <input type="text" class="select-input" id="customMergeNameInput" style="width: 100%;">
+    </div>
+    <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px;">
+      <button class="btn" onclick="closeMultiMergeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="executeMultiMerge()">Confirm Merge</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast Container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+let currentView = 'view-gallery';
+let pollInterval = null;
+let currentLibraries = [];
+window.imagesStore = new Map();
+let lastRawSearchResults = [];
+let scoreSliderDebounceTimer = null;
+let currentLightboxImgId = null;
+let selectedPersons = new Map(); // personId -> person object
+
+// Navigation
+document.querySelectorAll('.nav-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.view-container').forEach(v => v.classList.remove('active'));
+    
+    btn.classList.add('active');
+    const target = btn.getAttribute('data-view');
+    document.getElementById(target).classList.add('active');
+    currentView = target;
+    
+    const titles = {
+      'view-gallery': 'All Photos (Gallery)',
+      'view-timeline': 'Chronological Timeline',
+      'view-search': 'Semantic & Face Search',
+      'view-faces': 'Face Gallery & Clustering',
+      'view-libraries': 'Albums & Custom Drives',
+      'view-scanner': 'Engine Analysis & Progress'
+    };
+    document.getElementById('pageTitle').textContent = titles[target] || 'EveryImage';
+
+    if (target === 'view-gallery') loadGallery();
+    if (target === 'view-timeline') loadTimeline();
+    if (target === 'view-faces') loadFaces();
+    if (target === 'view-libraries') loadLibraries();
+    if (target === 'view-scanner') updateScannerStatus();
+  });
+});
+
+// App Startup
+async function initApp() {
+  await refreshStats();
+  await populateLibraryDropdowns();
+  await loadTagSuggestions();
+  await loadGallery();
+  startStatusPolling();
+}
+
+// Toast System
+function showToast(message, type = 'info') {
+  const container = document.getElementById('toastContainer');
+  if (!container) return;
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 300);
+  }, 3200);
+}
+
+async function refreshStats() {
+  try {
+    const res = await fetch('/api/stats');
+    const d = await res.json();
+    document.getElementById('sidebarCountText').textContent = `${d.tagged_images} Images Indexed`;
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function populateLibraryDropdowns() {
+  try {
+    const res = await fetch('/api/libraries');
+    currentLibraries = await res.json();
+
+    const gSelect = document.getElementById('galleryLibFilter');
+    const tSelect = document.getElementById('timelineLibFilter');
+    const sSelect = document.getElementById('searchLibFilter');
+
+    let opts = '<option value="">All Albums</option>';
+    currentLibraries.forEach(l => {
+      opts += `<option value="${l.id}">${l.path}</option>`;
+    });
+    gSelect.innerHTML = opts;
+    tSelect.innerHTML = opts;
+    if (sSelect) sSelect.innerHTML = opts;
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+// Tag Suggestions
+async function loadTagSuggestions() {
+  try {
+    const res = await fetch('/api/tags/suggestions');
+    const suggestions = await res.json();
+    const container = document.getElementById('searchChipsRow');
+    if (!container) return;
+
+    if (suggestions.length === 0) {
+      container.innerHTML = '';
+      return;
+    }
+
+    container.innerHTML = suggestions.map(tag => `
+      <div class="chip" onclick="applyQuery('${tag.replace(/'/g, "\\'")}')">${tag}</div>
+    `).join('');
+  } catch (e) {
+    console.error('Failed to load tag suggestions:', e);
+  }
+}
+
+// 1. Regular Gallery View
+async function loadGallery() {
+  const grid = document.getElementById('regularGalleryGrid');
+  const libId = document.getElementById('galleryLibFilter').value;
+  const sort = document.getElementById('gallerySort').value;
+  const countLabel = document.getElementById('galleryCountLabel');
+
+  grid.innerHTML = '<div style="color:var(--text-muted); padding:20px;">Loading gallery...</div>';
+
+  let url = `/api/gallery?sort=${sort}`;
+  if (libId) url += `&library_id=${libId}`;
+
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+
+    countLabel.textContent = `${data.total} photos`;
+
+    if (data.images.length === 0) {
+      grid.innerHTML = '<div style="grid-column: 1/-1; padding: 40px; text-align: center; color: var(--text-muted);">No photos indexed yet. Start analysis in Albums & Drives or the scanner tab.</div>';
+      return;
+    }
+
+    data.images.forEach(img => window.imagesStore.set(img.id, img));
+
+    grid.innerHTML = data.images.map(img => `
+      <div class="img-card" onclick="openLightboxById(${img.id})">
+        <img src="/thumbnails/${img.header_hash}.webp" onerror="this.src='/thumbnails/placeholder.webp'" alt="${img.file_name}" loading="lazy">
+        <div class="img-card-info">
+          <div class="img-title" title="${img.file_name}">${img.file_name}</div>
+          <div class="img-meta-row">
+            <span>${(img.captured_at || '').substring(0, 10)}</span>
+            <span>${img.width || 0}x${img.height || 0}</span>
+            ${img.ocr_text ? `<span style="color:var(--success); font-weight:700; font-size:9px; background:rgba(16, 185, 129, 0.15); padding:1px 5px; border-radius:3px; border:1px solid rgba(16, 185, 129, 0.3);">OCR</span>` : ''}
+          </div>
+          <div class="img-actions" onclick="event.stopPropagation()">
+            <button class="btn" onclick="openLightboxById(${img.id})">View</button>
+            <button class="btn" onclick="openImageById(${img.id}, true)">Folder</button>
+          </div>
+        </div>
+      </div>
+    `).join('');
+  } catch (e) {
+    grid.innerHTML = `<div style="color:var(--danger);">Error loading gallery: ${e.message}</div>`;
+  }
+}
+
+// 2. Timeline View
+async function loadTimeline() {
+  const content = document.getElementById('timelineContent');
+  const scrubber = document.getElementById('timelineScrubber');
+  const libId = document.getElementById('timelineLibFilter').value;
+
+  content.innerHTML = '<div style="color:var(--text-muted); padding:20px;">Loading timeline...</div>';
+  scrubber.innerHTML = '';
+
+  let url = '/api/timeline';
+  if (libId) url += `?library_id=${libId}`;
+
+  try {
+    const res = await fetch(url);
+    const groups = await res.json();
+
+    if (groups.length === 0) {
+      content.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text-muted);">No chronological photos found. Index albums with timestamped photos to see timeline.</div>';
+      return;
+    }
+
+    const seenYears = new Set();
+    let scrubberHtml = '';
+    groups.forEach(g => {
+      if (g.year && !seenYears.has(g.year)) {
+        seenYears.add(g.year);
+        scrubberHtml += `<div class="scrubber-item" onclick="jumpToPeriod('section-${g.year}')">${g.year}</div>`;
+      }
+      g.images.forEach(img => window.imagesStore.set(img.id, img));
+    });
+    scrubber.innerHTML = scrubberHtml;
+
+    content.innerHTML = groups.map(g => {
+      const secId = `section-${g.year}`;
+      return `
+        <div id="${secId}">
+          <div class="timeline-section-title">
+            <span>${formatPeriod(g.period)}</span>
+            <span class="timeline-badge">${g.images.length} photos</span>
+          </div>
+          <div class="gallery-grid">
+            ${g.images.map(img => `
+              <div class="img-card" onclick="openLightboxById(${img.id})">
+                <img src="/thumbnails/${img.header_hash}.webp" onerror="this.src='/thumbnails/placeholder.webp'" alt="${img.file_name}" loading="lazy">
+                <div class="img-card-info">
+                  <div class="img-title" title="${img.file_name}">${img.file_name}</div>
+                  <div class="img-meta-row">
+                    <span>${(img.captured_at || '').substring(0, 10)}</span>
+                    <span>${img.width || 0}x${img.height || 0}</span>
+                  </div>
+                  <div class="img-actions" onclick="event.stopPropagation()">
+                    <button class="btn" onclick="openLightboxById(${img.id})">View</button>
+                    <button class="btn" onclick="openImageById(${img.id}, true)">Folder</button>
+                  </div>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (e) {
+    content.innerHTML = `<div style="color:var(--danger);">Error loading timeline: ${e.message}</div>`;
+  }
+}
+
+function formatPeriod(periodStr) {
+  if (!periodStr || periodStr === 'Unknown') return 'Undated Photos';
+  const parts = periodStr.split('-');
+  if (parts.length === 2) {
+    const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const mIdx = parseInt(parts[1], 10) - 1;
+    return `${monthNames[mIdx] || parts[1]} ${parts[0]}`;
+  }
+  return periodStr;
+}
+
+function jumpToPeriod(elemId) {
+  const el = document.getElementById(elemId);
+  if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// Lightbox
+function openLightboxById(id) {
+  const img = window.imagesStore.get(id);
+  if (!img) return;
+  currentLightboxImgId = id;
+
+  document.getElementById('lightboxTitle').textContent = img.file_name;
+  
+  // Display low-res thumbnail instantly
+  const lbImg = document.getElementById('lightboxImg');
+  lbImg.src = `/thumbnails/${img.header_hash}.webp`;
+
+  const badge = document.getElementById('lightboxResBadge');
+  badge.textContent = 'Loading Full Res...';
+  badge.style.color = 'var(--accent)';
+
+  // Asynchronously upgrade to raw full-resolution image
+  const fullImg = new Image();
+  fullImg.src = `/api/images/${img.id}/file`;
+  fullImg.onload = () => {
+    if (currentLightboxImgId === id) {
+      lbImg.src = fullImg.src;
+      badge.textContent = 'Full Resolution Loaded';
+      badge.style.color = 'var(--success)';
+    }
+  };
+  fullImg.onerror = () => {
+    if (currentLightboxImgId === id) {
+      badge.textContent = 'Thumbnail Preview (Raw file unreadable)';
+      badge.style.color = 'var(--warning)';
+    }
+  };
+
+  document.getElementById('lightboxMeta').textContent = `Captured: ${img.captured_at || 'Unknown'} | Dimensions: ${img.width || 0}x${img.height || 0} px | Size: ${(img.file_size / 1024).toFixed(1)} KB | Path: ${img.file_path}`;
+
+  // Fetch detected faces for this image
+  const facesSection = document.getElementById('lightboxFacesSection');
+  const facesRow = document.getElementById('lightboxFacesRow');
+  const faceCount = document.getElementById('lightboxFaceCount');
+  facesSection.style.display = 'none';
+  facesRow.innerHTML = '';
+
+  fetch(`/api/images/${id}/faces`)
+    .then(r => r.json())
+    .then(faces => {
+      if (currentLightboxImgId === id && faces && faces.length > 0) {
+        faceCount.textContent = faces.length;
+        facesRow.innerHTML = faces.map(f => `
+          <div class="chip" onclick="closeLightbox(); searchPerson('${(f.person_name || 'Person').replace(/'/g, "\\'")}', ${f.person_id || 'null'})" style="display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-color:var(--accent); background:var(--bg-card); cursor:pointer;">
+            <img src="/thumbnails/${f.crop_thumb || 'placeholder.webp'}" onerror="this.src='/thumbnails/placeholder.webp'" style="width:22px; height:22px; border-radius:50%; object-fit:cover; background:#000;">
+            <span style="font-weight:600; font-size:11px; color:var(--text-main);">${f.person_name || 'Unnamed Face'}</span>
+          </div>
+        `).join('');
+        facesSection.style.display = 'block';
+      }
+    })
+    .catch(() => {});
+
+  document.getElementById('btnLightboxOpen').onclick = () => window.open(`/api/images/${id}/file`, '_blank');
+  document.getElementById('btnLightboxApp').onclick = () => openImageById(id, false);
+  document.getElementById('btnLightboxFolder').onclick = () => openImageById(id, true);
+
+  // Show OCR text if available
+  const ocrSection = document.getElementById('lightboxOcrSection');
+  const ocrTextEl = document.getElementById('lightboxOcrText');
+  if (img.ocr_text && img.ocr_text.trim()) {
+    ocrTextEl.textContent = img.ocr_text;
+    ocrSection.style.display = 'block';
+  } else {
+    ocrSection.style.display = 'none';
+  }
+
+  document.getElementById('lightboxModal').classList.add('active');
+}
+
+function closeLightbox() {
+  document.getElementById('lightboxModal').classList.remove('active');
+  const facesSection = document.getElementById('lightboxFacesSection');
+  if (facesSection) facesSection.style.display = 'none';
+  const ocrSection = document.getElementById('lightboxOcrSection');
+  if (ocrSection) ocrSection.style.display = 'none';
+  currentLightboxImgId = null;
+}
+
+function copyLightboxOcrText() {
+  const txt = document.getElementById('lightboxOcrText').textContent;
+  if (txt) {
+    navigator.clipboard.writeText(txt).then(() => showToast('Copied OCR text to clipboard', 'success'));
+  }
+}
+
+// Search & Score Slider
+function toggleSearchFilters() {
+  const box = document.getElementById('searchFiltersBox');
+  box.style.display = (box.style.display === 'none') ? 'block' : 'none';
+}
+
+function resetSearchFilters() {
+  document.getElementById('searchScoreSlider').value = '0.075';
+  document.getElementById('scoreValLabel').textContent = '0.075';
+  document.getElementById('searchFromDate').value = '';
+  document.getElementById('searchToDate').value = '';
+  document.getElementById('searchLibFilter').value = '';
+  executeSearch();
+}
+
+function onScoreSliderInput(val) {
+  const score = parseFloat(val);
+  document.getElementById('scoreValLabel').textContent = score.toFixed(3);
+
+  // Immediate 0ms local filter if we already have query results
+  if (lastRawSearchResults && lastRawSearchResults.length > 0) {
+    renderFilteredSearchResults(score);
+  }
+
+  // Debounced server search to guarantee freshness
+  if (scoreSliderDebounceTimer) clearTimeout(scoreSliderDebounceTimer);
+  scoreSliderDebounceTimer = setTimeout(() => {
+    executeSearch(true);
+  }, 250);
+}
+
+function renderFilteredSearchResults(minScoreThreshold) {
+  const gridEl = document.getElementById('searchResultsGrid');
+  const metaEl = document.getElementById('searchMeta');
+  const filtered = lastRawSearchResults.filter(r => r.similarity >= minScoreThreshold);
+
+  metaEl.textContent = `Showing ${filtered.length} of ${lastRawSearchResults.length} matches (Score >= ${minScoreThreshold.toFixed(3)})`;
+
+  if (filtered.length === 0) {
+    gridEl.innerHTML = `<div style="grid-column: 1/-1; padding: 40px; text-align: center; color: var(--text-muted);">No images meet the score threshold (${minScoreThreshold.toFixed(3)}). Slide left to relax threshold.</div>`;
+    return;
+  }
+
+  filtered.forEach(r => window.imagesStore.set(r.id, r));
+
+  gridEl.innerHTML = filtered.map(r => `
+    <div class="img-card" onclick="openLightboxById(${r.id})">
+      <img src="/thumbnails/${r.header_hash}.webp" onerror="this.src='/thumbnails/placeholder.webp'" alt="${r.file_name}" loading="lazy">
+      <div class="img-card-info">
+        <div>
+          <div class="img-title" title="${r.file_path}">${r.file_name}</div>
+          <div style="font-size: 11px; color: var(--text-muted);">${r.width || 0}x${r.height || 0} px</div>
+        </div>
+        ${r.ocr_match ? `
+          <div style="margin:4px 0; padding:4px 8px; background:rgba(16, 185, 129, 0.15); border:1px solid rgba(16, 185, 129, 0.4); border-radius:4px; font-size:10px; color:var(--success); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${(r.ocr_text || '').replace(/"/g, '&quot;')}">
+            <b>OCR Match:</b> ${(r.ocr_text || '').slice(0, 36)}...
+          </div>
+        ` : `
+          <div>
+            <div class="img-sim-bar">
+              <div class="img-sim-fill" style="width: ${Math.max(0, Math.min(100, ((r.confidence !== undefined ? r.confidence : r.similarity / 0.15)) * 100))}%;"></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:10px; color:var(--text-muted); margin-top:3px;">
+              <span>${r.confidence !== undefined ? Math.round(r.confidence * 100) + '% match' : 'Match'}</span>
+              <b>${r.similarity.toFixed(4)}</b>
+            </div>
+          </div>
+        `}
+        <div class="img-actions" onclick="event.stopPropagation()">
+          <button class="btn" onclick="openLightboxById(${r.id})">View</button>
+          <button class="btn" onclick="openImageById(${r.id}, true)">Folder</button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function executeSearch(isSlider = false) {
+  const query = document.getElementById('searchInput').value.trim();
+  if (!query) return;
+
+  const currentSliderScore = parseFloat(document.getElementById('searchScoreSlider').value) || 0.075;
+  const fromDate = document.getElementById('searchFromDate').value;
+  const toDate = document.getElementById('searchToDate').value;
+  const libId = document.getElementById('searchLibFilter').value;
+
+  const metaEl = document.getElementById('searchMeta');
+  const gridEl = document.getElementById('searchResultsGrid');
+  if (!isSlider) {
+    metaEl.textContent = 'Searching index...';
+    gridEl.innerHTML = '';
+  }
+
+  // Request from 0.00 so client-side slider can filter instantaneously across all non-negative scores
+  let url = `/api/search?q=${encodeURIComponent(query)}&min_score=0.00`;
+  if (activePersonId) url += `&person_id=${activePersonId}`;
+  if (fromDate) url += `&from_date=${fromDate}`;
+  if (toDate) url += `&to_date=${toDate}`;
+  if (libId) url += `&library_id=${libId}`;
+
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+
+    lastRawSearchResults = data.results || [];
+    lastRawSearchResults.forEach(r => {
+      r.id = r.id || r.image_id;
+      window.imagesStore.set(r.id, r);
+    });
+
+    renderFilteredSearchResults(currentSliderScore);
+
+    if (data.ocr_only) {
+      metaEl.innerHTML = `<span style="background:rgba(16,185,129,0.15); color:var(--success); border:1px solid rgba(16,185,129,0.35); padding:3px 10px; border-radius:12px; font-weight:600; margin-right:8px;">In-Photo Text (OCR)</span> Found <b>${data.total_matches}</b> images matching text inside photo`;
+    } else if (data.matched_person) {
+      if (data.is_person_only) {
+        metaEl.innerHTML = `<span style="background:rgba(59,130,246,0.18); color:var(--accent); border:1px solid rgba(59,130,246,0.35); padding:3px 10px; border-radius:12px; font-weight:600; margin-right:8px;">Person: ${data.matched_person}</span> Showing all <b>${data.total_matches}</b> photos`;
+      } else {
+        metaEl.innerHTML = `Identified Person: <b style="color:var(--accent);">${data.matched_person}</b> | Scene: "<i>${data.scene_prompt}</i>" | Total Candidates: ${data.total_matches}`;
+      }
+    }
+  } catch (e) {
+    metaEl.textContent = 'Search failed: ' + e.message;
+  }
+}
+
+function applyQuery(q) {
+  document.getElementById('searchInput').value = q;
+  executeSearch();
+}
+
+// File Reveal & Viewer Handlers
+async function openImageById(id, reveal) {
+  const img = window.imagesStore.get(id);
+  if (!img) {
+    showToast('Image metadata not found', 'error');
+    return;
+  }
+  try {
+    const res = await fetch('/api/images/open', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_path: img.file_path, reveal: reveal })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Could not open file on disk', 'error');
+    } else {
+      showToast(reveal ? 'Revealed in Windows Explorer' : 'Opening full resolution photo...', 'success');
+    }
+  } catch (e) {
+    showToast('Failed to open file: ' + e.message, 'error');
+  }
+}
+
+// 4. Face Gallery & Clustering
+async function loadFaces() {
+  const grid = document.getElementById('facesGrid');
+  try {
+    const res = await fetch('/api/faces/persons');
+    const persons = await res.json();
+    
+    // Filter out any 0-face entries
+    const validPersons = persons.filter(p => p.face_count > 0);
+    
+    if (validPersons.length === 0) {
+      grid.innerHTML = '<div style="grid-column: 1/-1; padding: 40px; text-align: center; color: var(--text-muted);">No faces tagged yet. Index albums containing people to see automatic clusters.</div>';
+      clearFaceSelection();
+      return;
+    }
+
+    grid.innerHTML = validPersons.map(p => {
+      const isSelected = selectedPersons.has(p.id);
+      const safeData = JSON.stringify(p).replace(/"/g, '&quot;');
+      return `
+        <div class="face-person-card ${isSelected ? 'selected' : ''}" 
+             data-person-id="${p.id}"
+             onclick="togglePersonSelection(${p.id}, ${safeData}, event)">
+          <div class="face-select-check"></div>
+          <img class="face-cover" src="/thumbnails/${p.cover_thumb || 'placeholder.webp'}" onerror="this.src='/thumbnails/placeholder.webp'">
+          <input class="face-name-input" value="${p.name}" 
+                 onclick="event.stopPropagation()"
+                 onblur="handleRenamePerson(${p.id}, this, '${p.name.replace(/'/g, "\\'")}')" 
+                 onkeydown="if(event.key==='Enter') this.blur()">
+          <div class="face-count">${p.face_count} photos</div>
+          <button class="btn" style="font-size:11px; width:100%;" onclick="event.stopPropagation(); searchPerson('${p.name.replace(/'/g, "\\'")}', ${p.id})">View Photos</button>
+        </div>
+      `;
+    }).join('');
+
+    updateSelectionUI();
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function togglePersonSelection(personId, personObj, event) {
+  if (event && event.target && (event.target.tagName === 'INPUT' || event.target.tagName === 'BUTTON')) {
+    return;
+  }
+  if (selectedPersons.has(personId)) {
+    selectedPersons.delete(personId);
+  } else {
+    selectedPersons.set(personId, personObj);
+  }
+  updateSelectionUI();
+}
+
+function updateSelectionUI() {
+  const bar = document.getElementById('faceSelectionBar');
+  const countEl = document.getElementById('selectedFacesCount');
+  const count = selectedPersons.size;
+
+  if (count >= 2) {
+    bar.style.display = 'flex';
+    countEl.textContent = count;
+  } else {
+    bar.style.display = 'none';
+  }
+
+  document.querySelectorAll('.face-person-card').forEach(card => {
+    const pid = parseInt(card.getAttribute('data-person-id'), 10);
+    if (selectedPersons.has(pid)) {
+      card.classList.add('selected');
+    } else {
+      card.classList.remove('selected');
+    }
+  });
+}
+
+function clearFaceSelection() {
+  selectedPersons.clear();
+  updateSelectionUI();
+}
+
+// Rename Face Person (with auto-merge)
+async function handleRenamePerson(id, inputElem, oldName) {
+  const newName = inputElem.value.trim();
+  if (!newName || newName === oldName) {
+    inputElem.value = oldName;
+    return;
+  }
+  try {
+    const res = await fetch(`/api/faces/persons/${id}/rename`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: newName })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.detail || 'Rename failed', 'error');
+      inputElem.value = oldName;
+      return;
+    }
+    if (data.status === 'merged') {
+      showToast(`Auto-merged with existing person "${newName}"`, 'success');
+    } else {
+      showToast(`Renamed to "${newName}"`, 'success');
+    }
+    await loadFaces();
+    loadTagSuggestions();
+  } catch (e) {
+    showToast('Error updating name: ' + e.message, 'error');
+    inputElem.value = oldName;
+  }
+}
+
+let activePersonId = null;
+
+function searchPerson(name, personId = null) {
+  activePersonId = personId;
+  document.querySelector('.nav-btn[data-view="view-search"]').click();
+  document.getElementById('searchInput').value = name;
+  executeSearch();
+}
+
+// Multi-Merge Dialog
+function openMultiMergeModal() {
+  if (selectedPersons.size < 2) return;
+  const listContainer = document.getElementById('multiMergeOptionsList');
+  const persons = Array.from(selectedPersons.values());
+
+  persons.sort((a, b) => b.face_count - a.face_count);
+
+  listContainer.innerHTML = persons.map((p, idx) => `
+    <label style="display: flex; align-items: center; gap: 10px; padding: 8px 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; margin-bottom: 6px;">
+      <input type="radio" name="mergeTargetPerson" value="${p.id}" ${idx === 0 ? 'checked' : ''} onchange="onMergeTargetRadioChange('${p.name.replace(/'/g, "\\'")}')">
+      <img src="/thumbnails/${p.cover_thumb || 'placeholder.webp'}" onerror="this.src='/thumbnails/placeholder.webp'" style="width: 32px; height: 32px; border-radius: 50%; object-fit: cover; background: #000;">
+      <div>
+        <div style="font-size: 13px; font-weight: 600;">${p.name}</div>
+        <div style="font-size: 11px; color: var(--text-muted);">${p.face_count} photos</div>
+      </div>
+    </label>
+  `).join('');
+
+  document.getElementById('customMergeNameInput').value = persons[0].name;
+  document.getElementById('multiMergeModal').classList.add('active');
+}
+
+function onMergeTargetRadioChange(name) {
+  document.getElementById('customMergeNameInput').value = name;
+}
+
+function closeMultiMergeModal() {
+  document.getElementById('multiMergeModal').classList.remove('active');
+}
+
+async function executeMultiMerge() {
+  const selectedRadio = document.querySelector('input[name="mergeTargetPerson"]:checked');
+  if (!selectedRadio) return;
+
+  const targetId = parseInt(selectedRadio.value, 10);
+  const customName = document.getElementById('customMergeNameInput').value.trim();
+  const allIds = Array.from(selectedPersons.keys());
+  const sourceIds = allIds.filter(id => id !== targetId);
+
+  if (sourceIds.length === 0) {
+    showToast('Select at least two different faces to merge', 'error');
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/faces/merge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_id: targetId, source_ids: sourceIds })
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      showToast(err.detail || 'Merge failed', 'error');
+      return;
+    }
+
+    if (customName) {
+      await fetch(`/api/faces/persons/${targetId}/rename`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: customName })
+      });
+    }
+
+    showToast(`Successfully merged ${allIds.length} face clusters`, 'success');
+    closeMultiMergeModal();
+    clearFaceSelection();
+    await loadFaces();
+    loadTagSuggestions();
+  } catch (e) {
+    showToast('Merge error: ' + e.message, 'error');
+  }
+}
+
+// 5. Libraries / Albums
+async function loadLibraries() {
+  const list = document.getElementById('librariesList');
+  try {
+    const res = await fetch('/api/libraries');
+    currentLibraries = await res.json();
+
+    if (currentLibraries.length === 0) {
+      list.innerHTML = '<div style="color: var(--text-muted); font-size:13px;">No albums configured yet. Add a directory above.</div>';
+      return;
+    }
+
+    list.innerHTML = currentLibraries.map(l => `
+      <div class="lib-item">
+        <div>
+          <div class="lib-path">${l.path}</div>
+          <div class="lib-meta">${l.image_count} images indexed</div>
+        </div>
+        <button class="btn btn-danger" onclick="removeLibrary(${l.id})">Remove</button>
+      </div>
+    `).join('');
+    populateLibraryDropdowns();
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function addLibrary() {
+  const input = document.getElementById('newLibInput');
+  const path = input.value.trim();
+  if (!path) return;
+
+  try {
+    const res = await fetch('/api/libraries', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: path })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      showToast(err.detail || 'Could not add library', 'error');
+      return;
+    }
+    input.value = '';
+    showToast('Album successfully added', 'success');
+    loadLibraries();
+    loadTagSuggestions();
+  } catch (e) {
+    showToast('Failed to add album: ' + e.message, 'error');
+  }
+}
+
+async function removeLibrary(id) {
+  if (!confirm('Remove this album from EveryImage? All indexed data for this folder will be purged.')) return;
+  try {
+    const res = await fetch(`/api/libraries/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+      showToast('Album removed and images purged from index', 'info');
+      await loadLibraries();
+      await refreshStats();
+      await loadGallery();
+      await loadFaces();
+      loadTagSuggestions();
+    } else {
+      showToast('Failed to remove album', 'error');
+    }
+  } catch (e) {
+    showToast('Error removing album: ' + e.message, 'error');
+  }
+}
+
+// 6. Indexing & Scanner
+async function startScan() {
+  try {
+    const res = await fetch('/api/scan/start', { method: 'POST' });
+    const data = await res.json();
+    showToast(data.message || 'Analysis engine started', 'success');
+    updateScannerStatus();
+  } catch (e) {
+    showToast('Failed to start scanner: ' + e.message, 'error');
+  }
+}
+
+async function stopScan() {
+  try {
+    const res = await fetch('/api/scan/stop', { method: 'POST' });
+    const data = await res.json();
+    showToast(data.message || 'Analysis engine stopped', 'info');
+    updateScannerStatus();
+  } catch (e) {
+    showToast('Failed to stop scanner: ' + e.message, 'error');
+  }
+}
+
+async function confirmClearAndRebuild() {
+  const confirmed = confirm("Are you sure you want to clear the entire database (all photos, faces, and OCR text) and perform a complete rebuild from your albums?");
+  if (!confirmed) return;
+
+  try {
+    showToast('Clearing database and starting full rebuild...', 'info');
+    const res = await fetch('/api/database/rebuild', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keep_libraries: true })
+    });
+    const data = await res.json();
+    if (data.status === 'rebuilding') {
+      showToast('Database cleared. Full rebuild initiated...', 'success');
+      document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.view-container').forEach(v => v.classList.remove('active'));
+      const scanNav = document.querySelector('[data-view="view-scanner"]');
+      const scanView = document.getElementById('view-scanner');
+      if (scanNav) scanNav.classList.add('active');
+      if (scanView) scanView.classList.add('active');
+      document.getElementById('pageTitle').textContent = 'Analysis & Indexing';
+      updateScannerStatus();
+    } else {
+      showToast('Rebuild failed to start', 'error');
+    }
+  } catch (e) {
+    showToast('Failed to trigger rebuild: ' + e.message, 'error');
+  }
+}
+
+async function updateScannerStatus() {
+  try {
+    const res = await fetch('/api/scan/status');
+    const s = await res.json();
+
+    const isRunning = (s.state === 'crawling' || s.state === 'indexing');
+
+    // Update buttons in Analysis & Indexing
+    const scanStart = document.getElementById('btnScanStart');
+    const scanStop = document.getElementById('btnScanStop');
+    const scanRebuild = document.getElementById('btnScanRebuild');
+    if (scanStart) scanStart.style.display = isRunning ? 'none' : 'inline-flex';
+    if (scanStop) scanStop.style.display = isRunning ? 'inline-flex' : 'none';
+    if (scanRebuild) scanRebuild.style.display = isRunning ? 'none' : 'inline-flex';
+
+    const dot = document.getElementById('sidebarDot');
+    const sText = document.getElementById('sidebarStatusText');
+    if (isRunning) {
+      dot.className = 'status-dot scanning';
+      sText.textContent = `Indexing (${s.percentage}%)`;
+    } else {
+      dot.className = 'status-dot active';
+      sText.textContent = 'Ready';
+    }
+
+    let phaseTitle = `Engine: ${s.state.toUpperCase()}`;
+    if (s.state === 'crawling') phaseTitle = 'Engine: DISCOVERING FILES';
+    if (s.state === 'indexing') phaseTitle = 'Engine: ANALYZING & TAGGING (GPU)';
+    document.getElementById('scanStatusTitle').textContent = phaseTitle;
+    document.getElementById('scanCurrentFile').textContent = s.current_file || (isRunning ? 'Processing...' : 'Idle');
+    document.getElementById('scanProgressBar').style.width = `${s.percentage}%`;
+    document.getElementById('scanPercentLabel').textContent = `${s.percentage}% Complete (${s.tagged_files} / ${s.total_files})`;
+    document.getElementById('scanSpeedLabel').textContent = `${s.speed_fps} images/sec`;
+
+    document.getElementById('statScanned').textContent = s.scanned_files;
+    document.getElementById('statTagged').textContent = s.tagged_files;
+    document.getElementById('statFaces').textContent = s.faces_found;
+    document.getElementById('statElapsed').textContent = `${s.elapsed_sec}s`;
+
+    if (!isRunning) {
+      refreshStats();
+    }
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function startStatusPolling() {
+  if (pollInterval) clearInterval(pollInterval);
+  pollInterval = setInterval(updateScannerStatus, 400);
+}
+
+window.onload = initApp;
+</script>
+</body>
+</html>

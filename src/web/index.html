@@ -1062,6 +1062,83 @@ header {
         </div>
       </div>
     </div>
+
+    <!-- SYSTEM, DATABASE & STORAGE METRICS DASHBOARD -->
+    <div class="progress-card" style="margin-top: 20px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 12px;">
+        <div>
+          <div style="font-size: 15px; font-weight: 700; color: var(--text-main);">Database &amp; Storage Metrics</div>
+          <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;" id="metricsLastUpdated">Click refresh to load latest metrics</div>
+        </div>
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <span id="metricsLatencyBadge" style="font-size: 11px; color: var(--text-muted); font-family: monospace;"></span>
+          <button class="btn btn-primary" id="btnRefreshMetrics" onclick="loadSystemMetrics()" style="font-size: 12px; padding: 6px 14px;">Refresh Metrics</button>
+        </div>
+      </div>
+
+      <!-- SECTION 1: DATABASE & INDEXING -->
+      <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--accent); margin-bottom: 8px; letter-spacing: 0.5px;">Database &amp; Content</div>
+      <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr); margin-top: 0; margin-bottom: 16px;">
+        <div class="stat-box">
+          <div class="stat-val" id="metricTotalImages">0</div>
+          <div class="stat-lbl">Photos (<span id="metricIndexedPct">0%</span> Indexed)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="metricOcrImages">0</div>
+          <div class="stat-lbl">OCR Photos (<span id="metricOcrWords">0</span> Words)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="metricTotalFaces">0</div>
+          <div class="stat-lbl">Faces (<span id="metricTotalPersons">0</span> Clusters)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="metricDbSize">0 MB</div>
+          <div class="stat-lbl">Database File (SQLite WAL)</div>
+        </div>
+      </div>
+
+      <!-- SECTION 2: STORAGE & CACHE SPACE -->
+      <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--accent); margin-bottom: 8px; letter-spacing: 0.5px;">Cache &amp; Disk Usage</div>
+      <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr); margin-top: 0; margin-bottom: 16px;">
+        <div class="stat-box">
+          <div class="stat-val" id="metricPhotoThumbs">0 MB</div>
+          <div class="stat-lbl">Photo Thumbs (<span id="metricPhotoThumbsCount">0</span> files)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="metricFaceChips">0 MB</div>
+          <div class="stat-lbl">Face Chips (<span id="metricFaceChipsCount">0</span> files)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="metricTotalCache">0 MB</div>
+          <div class="stat-lbl">Total Cache Space Used</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="metricDriveFree">0 GB</div>
+          <div class="stat-lbl">Drive Free (<span id="metricDriveUsedPct">0%</span> Used)</div>
+        </div>
+      </div>
+
+      <!-- SECTION 3: VECTOR INDEX & HARDWARE PIPELINE -->
+      <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--accent); margin-bottom: 8px; letter-spacing: 0.5px;">Vector Engine &amp; Hardware</div>
+      <div class="stats-grid" style="grid-template-columns: repeat(4, 1fr); margin-top: 0;">
+        <div class="stat-box">
+          <div class="stat-val" id="metricVecImages" style="font-size: 16px;">0</div>
+          <div class="stat-lbl">SigLIP 2 Embeddings (768-D)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="metricVecFaces" style="font-size: 16px;">0</div>
+          <div class="stat-lbl">ArcFace Embeddings (512-D)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="metricConstraints" style="font-size: 16px;">0 Active</div>
+          <div class="stat-lbl">Learned Rules (<span id="metricCannotLink">0</span> Ignored)</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="metricDevice" style="font-size: 13px; word-break: break-word; line-height: 1.3;">DirectML</div>
+          <div class="stat-lbl">Inference Acceleration</div>
+        </div>
+      </div>
+    </div>
   </div>
 </main>
 
@@ -1159,7 +1236,7 @@ document.querySelectorAll('.nav-btn').forEach(btn => {
     if (target === 'view-faces') loadFaces();
     if (target === 'view-duplicates') { if (currentOptSubTab === 'faces') loadMergeSuggestions(); else loadDuplicates(); loadMergeSuggestions(); }
     if (target === 'view-libraries') loadLibraries();
-    if (target === 'view-scanner') updateScannerStatus();
+    if (target === 'view-scanner') { updateScannerStatus(); loadSystemMetrics(); }
   });
 });
 
@@ -1169,6 +1246,7 @@ async function initApp() {
   await populateLibraryDropdowns();
   await loadTagSuggestions();
   await loadGallery();
+  loadSystemMetrics();
   startStatusPolling();
 }
 
@@ -1194,6 +1272,84 @@ async function refreshStats() {
     document.getElementById('sidebarCountText').textContent = `${d.tagged_images} Images Indexed`;
   } catch (e) {
     console.error(e);
+  }
+}
+
+async function loadSystemMetrics() {
+  const btn = document.getElementById('btnRefreshMetrics');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Refreshing...';
+  }
+  try {
+    const res = await fetch('/api/system/metrics');
+    if (!res.ok) throw new Error('Failed to fetch system metrics');
+    const data = await res.json();
+    const d = data.database || {};
+    const c = data.cache || {};
+    const hw = data.hardware || {};
+
+    // Database & Content
+    const elTotImg = document.getElementById('metricTotalImages');
+    if (elTotImg) elTotImg.textContent = (d.total_images || 0).toLocaleString();
+    const elIdxPct = document.getElementById('metricIndexedPct');
+    if (elIdxPct) elIdxPct.textContent = `${d.indexing_pct || 0}%`;
+    const elOcrImg = document.getElementById('metricOcrImages');
+    if (elOcrImg) elOcrImg.textContent = (d.ocr_images || 0).toLocaleString();
+    const elOcrWrd = document.getElementById('metricOcrWords');
+    if (elOcrWrd) elOcrWrd.textContent = (d.ocr_words || 0).toLocaleString();
+    const elTotFac = document.getElementById('metricTotalFaces');
+    if (elTotFac) elTotFac.textContent = (d.total_faces || 0).toLocaleString();
+    const elTotPer = document.getElementById('metricTotalPersons');
+    if (elTotPer) elTotPer.textContent = (d.total_persons || 0).toLocaleString();
+    const elDbSz = document.getElementById('metricDbSize');
+    if (elDbSz) elDbSz.textContent = `${d.db_size_mb || 0} MB`;
+
+    // Cache & Disk
+    const elPhTh = document.getElementById('metricPhotoThumbs');
+    if (elPhTh) elPhTh.textContent = `${c.thumbs_size_mb || 0} MB`;
+    const elPhThCnt = document.getElementById('metricPhotoThumbsCount');
+    if (elPhThCnt) elPhThCnt.textContent = (c.thumbs_count || 0).toLocaleString();
+    const elFcCh = document.getElementById('metricFaceChips');
+    if (elFcCh) elFcCh.textContent = `${c.faces_size_mb || 0} MB`;
+    const elFcChCnt = document.getElementById('metricFaceChipsCount');
+    if (elFcChCnt) elFcChCnt.textContent = (c.faces_count || 0).toLocaleString();
+    const elTotCa = document.getElementById('metricTotalCache');
+    if (elTotCa) elTotCa.textContent = `${c.total_cache_size_mb || 0} MB`;
+    const elDrvFr = document.getElementById('metricDriveFree');
+    if (elDrvFr) elDrvFr.textContent = `${c.drive_free_gb || 0} GB Free`;
+    const elDrvPct = document.getElementById('metricDriveUsedPct');
+    if (elDrvPct) elDrvPct.textContent = `${c.drive_used_pct || 0}%`;
+
+    // Vector Engine & Hardware
+    const elVecImg = document.getElementById('metricVecImages');
+    if (elVecImg) elVecImg.textContent = (d.vec_images || 0).toLocaleString();
+    const elVecFac = document.getElementById('metricVecFaces');
+    if (elVecFac) elVecFac.textContent = (d.vec_faces || 0).toLocaleString();
+    const totalConstraints = (d.cannot_link_count || 0) + (d.must_link_count || 0);
+    const elConstr = document.getElementById('metricConstraints');
+    if (elConstr) elConstr.textContent = `${totalConstraints} Rules`;
+    const elCannot = document.getElementById('metricCannotLink');
+    if (elCannot) elCannot.textContent = `${d.cannot_link_count || 0}`;
+    const elDev = document.getElementById('metricDevice');
+    if (elDev) elDev.textContent = hw.device_name || 'DirectML';
+
+    // Status bar & timestamp
+    const timeStr = data.timestamp || new Date().toLocaleTimeString();
+    const elUpdated = document.getElementById('metricsLastUpdated');
+    if (elUpdated) elUpdated.textContent = `Last refreshed: ${timeStr}`;
+    const elLat = document.getElementById('metricsLatencyBadge');
+    if (elLat && data.latency_ms !== undefined) {
+      elLat.textContent = `${data.latency_ms}ms query`;
+    }
+  } catch (err) {
+    console.error('Error loading metrics:', err);
+    showToast('Failed to refresh metrics: ' + err.message, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Refresh Metrics';
+    }
   }
 }
 

@@ -147,6 +147,10 @@ class OpenImageRequest(BaseModel):
 def get_stats():
     return db.get_stats()
 
+@app.get("/api/system/metrics")
+def get_system_metrics():
+    return db.get_system_metrics()
+
 @app.get("/api/scan/status")
 def get_scan_status():
     engine = IndexingEngine.get_instance()

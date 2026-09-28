@@ -1,5 +1,9 @@
 import sqlite3
 import sqlite_vec
+import os
+import shutil
+import time
+import datetime
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any
 import numpy as np
@@ -846,6 +850,138 @@ def get_stats() -> Dict[str, Any]:
         "total_faces": total_faces,
         "total_persons": total_persons,
         "total_libraries": total_libraries
+    }
+
+def get_system_metrics() -> Dict[str, Any]:
+    """
+    Computes comprehensive system, database, and storage metrics:
+    - Database row counts, indexing status, OCR text statistics
+    - Vector embeddings store counts and face learner constraints
+    - SQLite database file size and WAL size
+    - Thumbnail, face chip, and temp cache disk consumption
+    - Host drive storage usage
+    """
+    t0 = time.perf_counter()
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM images")
+        total_images = cur.fetchone()[0]
+
+        cur.execute("SELECT COUNT(*) FROM images WHERE has_embedding = 1")
+        indexed_images = cur.fetchone()[0]
+
+        cur.execute("SELECT COUNT(*) FROM images WHERE ocr_text IS NOT NULL AND length(trim(ocr_text)) > 0")
+        ocr_images = cur.fetchone()[0]
+
+        cur.execute("SELECT ocr_text FROM images WHERE ocr_text IS NOT NULL AND length(trim(ocr_text)) > 0")
+        ocr_words = sum(len(r[0].split()) for r in cur.fetchall())
+
+        cur.execute("SELECT COUNT(*) FROM faces")
+        total_faces = cur.fetchone()[0]
+
+        cur.execute("SELECT COUNT(*) FROM persons")
+        total_persons = cur.fetchone()[0]
+
+        cur.execute("SELECT COUNT(*) FROM persons WHERE name NOT LIKE 'Person %'")
+        named_persons = cur.fetchone()[0]
+
+        cur.execute("SELECT COUNT(*) FROM vec_images")
+        vec_images = cur.fetchone()[0]
+
+        cur.execute("SELECT COUNT(*) FROM vec_faces")
+        vec_faces = cur.fetchone()[0]
+
+        cur.execute("SELECT COUNT(*) FROM libraries")
+        libraries_count = cur.fetchone()[0]
+
+        try:
+            cur.execute("SELECT constraint_type, COUNT(*) FROM face_constraints GROUP BY constraint_type")
+            c_counts = dict(cur.fetchall())
+        except Exception:
+            c_counts = {}
+
+        cur.execute("PRAGMA page_count")
+        page_count = cur.fetchone()[0]
+        cur.execute("PRAGMA page_size")
+        page_size = cur.fetchone()[0]
+    finally:
+        conn.close()
+
+    db_p = DB_PATH
+    db_size = db_p.stat().st_size if db_p.exists() else 0
+    wal_p = cfg.DATA_DIR / f"{DB_PATH.name}-wal"
+    wal_size = wal_p.stat().st_size if wal_p.exists() else 0
+
+    def _dir_stats(p: Path) -> Tuple[int, int]:
+        count = 0
+        total_size = 0
+        if p.exists():
+            try:
+                for entry in os.scandir(p):
+                    if entry.is_file():
+                        count += 1
+                        total_size += entry.stat().st_size
+            except Exception:
+                pass
+        return count, total_size
+
+    tc, ts = _dir_stats(cfg.CACHE_THUMBNAILS)
+    fc, fs = _dir_stats(cfg.CACHE_THUMBNAILS / "faces")
+    temp_c, temp_s = _dir_stats(cfg.CACHE_TEMP)
+
+    try:
+        total_drive, used_drive, free_drive = shutil.disk_usage(cfg.DATA_DIR)
+    except Exception:
+        total_drive, used_drive, free_drive = 0, 0, 0
+
+    dt = (time.perf_counter() - t0) * 1000
+
+    return {
+        "database": {
+            "total_images": total_images,
+            "indexed_images": indexed_images,
+            "unindexed_images": max(0, total_images - indexed_images),
+            "indexing_pct": round(indexed_images / total_images * 100, 1) if total_images > 0 else 0.0,
+            "ocr_images": ocr_images,
+            "ocr_coverage_pct": round(ocr_images / total_images * 100, 1) if total_images > 0 else 0.0,
+            "ocr_words": ocr_words,
+            "total_faces": total_faces,
+            "total_persons": total_persons,
+            "named_persons": named_persons,
+            "vec_images": vec_images,
+            "vec_faces": vec_faces,
+            "cannot_link_count": c_counts.get("cannot_link", 0),
+            "must_link_count": c_counts.get("must_link", 0),
+            "db_size_bytes": db_size,
+            "db_size_mb": round(db_size / (1024 * 1024), 2),
+            "wal_size_bytes": wal_size,
+            "wal_size_mb": round(wal_size / (1024 * 1024), 2),
+            "page_size": page_size,
+            "page_count": page_count,
+            "libraries_count": libraries_count
+        },
+        "cache": {
+            "thumbs_count": tc,
+            "thumbs_size_mb": round(ts / (1024 * 1024), 2),
+            "faces_count": fc,
+            "faces_size_mb": round(fs / (1024 * 1024), 2),
+            "temp_count": temp_c,
+            "temp_size_mb": round(temp_s / (1024 * 1024), 2),
+            "total_cache_size_mb": round((ts + fs + temp_s) / (1024 * 1024), 2),
+            "drive_free_gb": round(free_drive / (1024 ** 3), 2),
+            "drive_total_gb": round(total_drive / (1024 ** 3), 2),
+            "drive_used_pct": round(used_drive / total_drive * 100, 1) if total_drive > 0 else 0.0
+        },
+        "hardware": {
+            "device_name": "DirectML (AMD Radeon RX 6750 XT)",
+            "vision_model": "SigLIP 2 Base (768-D)",
+            "face_model": "ArcFace w2_r100 + RetinaFace (512-D)",
+            "ocr_engine": "RapidOCR Multi-thread",
+            "face_learner": cfg.ENABLE_FACE_LEARNER
+        },
+        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "latency_ms": round(dt, 1)
     }
 
 def get_duplicate_groups(similarity_threshold: float = 0.96, limit: int = 50) -> List[Dict[str, Any]]:

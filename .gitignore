@@ -8,8 +8,7 @@ env/
 models/
 *.onnx
 *.onnx.data
-scratch/siglip*
-scratch/siglip2_tokenizer/
+scratch/
 
 # Database and SQLite vector files
 data/

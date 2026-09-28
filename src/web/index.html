@@ -958,7 +958,7 @@ header {
     <div class="merge-panel" id="mergeSuggestionsPanel" style="display: none;">
       <div class="merge-panel-title">Smart Merge Suggestions <span class="merge-panel-count" id="mergeSuggestionsCount">0</span></div>
       <div class="merge-suggestions-list" id="mergeSuggestionsList"></div>
-      <div style="margin-top: 10px; font-size: 11px; color: var(--text-muted);">Showing top suggestions above 70% confidence. Use Ctrl+click on cards to manually merge.</div>
+      <div style="margin-top: 10px; font-size: 11px; color: var(--text-muted);">Showing cluster pairs with centroid cosine similarity &gt;= 82%. Based on all face embeddings in each cluster, not just a cover photo. Confidence is discounted when a cluster is internally noisy.</div>
     </div>
 
     <div class="faces-grid" id="facesGrid"></div>
@@ -1863,7 +1863,7 @@ async function loadMergeSuggestions() {
   if (!panel || !list) return;
 
   try {
-    const res = await fetch('/api/faces/merge-suggestions?min_similarity=0.70&limit=20');
+    const res = await fetch('/api/faces/merge-suggestions?min_similarity=0.82&limit=20');
     const data = await res.json();
 
     if (!data.suggestions || data.suggestions.length === 0) {
@@ -1892,7 +1892,7 @@ async function loadMergeSuggestions() {
               <div class="merge-face-count">${candidate.face_count} photos</div>
             </div>
           </div>
-          <div class="merge-confidence">${s.confidence_pct}%</div>
+          <div class="merge-confidence" title="Centroid similarity: ${(s.centroid_similarity*100).toFixed(1)}% | Primary cluster quality: ${(s.primary_cohesion*100).toFixed(0)}% | Candidate cluster quality: ${(s.candidate_cohesion*100).toFixed(0)}%">${s.confidence_pct}%</div>
           <button class="btn merge-btn" onclick="quickMergeSuggestion(${primary.id}, ${candidate.id}, '${primary.name.replace(/'/g, "\'")}')">Merge</button>
         </div>`;
     }).join('');

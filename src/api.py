@@ -586,13 +586,15 @@ def get_duplicates(
 
 @app.get("/api/faces/merge-suggestions")
 def get_merge_suggestions(
-    min_similarity: float = Query(0.65, ge=0.40, le=0.99),
+    min_similarity: float = Query(0.82, ge=0.50, le=0.99),
     limit: int = Query(40, ge=1, le=100)
 ):
-    suggestions = db.get_face_merge_suggestions(min_similarity=min_similarity, limit=limit)
+    suggestions = db.get_face_merge_suggestions_centroid(min_similarity=min_similarity, limit=limit)
     return {
         "suggestions": suggestions,
-        "total": len(suggestions)
+        "total": len(suggestions),
+        "algorithm": "centroid",
+        "threshold": min_similarity
     }
 
 @app.get("/api/watcher/status")

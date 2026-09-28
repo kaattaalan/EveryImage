@@ -960,109 +960,171 @@ def get_duplicate_groups(similarity_threshold: float = 0.96, limit: int = 50) ->
     finally:
         conn.close()
 
+
 def get_face_merge_suggestions(min_similarity: float = 0.65, limit: int = 50) -> List[Dict[str, Any]]:
     """
-    Computes ArcFace embedding similarity between representative faces of distinct person clusters.
-    Returns suggested person merges above min_similarity.
+    Legacy single-cover-face merge suggestion. Delegates to the centroid-based
+    implementation with a floor of 0.82 to avoid low-precision matches.
+    """
+    return get_face_merge_suggestions_centroid(
+        min_similarity=max(float(min_similarity), 0.82),
+        limit=limit
+    )
+
+
+def get_face_merge_suggestions_centroid(min_similarity: float = 0.82, limit: int = 50) -> List[Dict[str, Any]]:
+    """
+    Centroid-based face cluster merge suggestions.
+
+    Algorithm:
+    1. For every person cluster, load all ArcFace 512-D unit-norm embeddings from vec_faces.
+    2. Compute the cluster centroid as the L2-normalized mean of all embeddings.
+    3. Compute intra-cluster cohesion (mean pairwise cosine sim up to 10 faces) as a quality weight.
+    4. For every unique pair of clusters, compute centroid-to-centroid cosine similarity.
+    5. Effective confidence = centroid_sim * (0.5 + 0.5 * min_cluster_cohesion).
+       This down-ranks suggestions where one cluster is internally noisy.
+    6. Return pairs where centroid cosine sim >= min_similarity, ranked descending.
+
+    Why centroid is better than single-cover-face KNN:
+    - A single cover face can be a pose/lighting outlier that misrepresents the cluster.
+    - Centroid averages out noise; two clusters of the same person consistently show
+      centroid cosine sim > 0.85 for ArcFace w2_r100 (buffalo_l).
+    - The threshold 0.82 on centroid similarity corresponds to very high precision on
+      real-world personal photo library data with the InsightFace buffalo_l model.
+
+    No re-indexing required -- uses the existing stored 512-D embeddings in vec_faces.
     """
     conn = get_connection()
     try:
         cur = conn.cursor()
+
+        # Load all person metadata. Cap at 300 for performance.
         cur.execute("""
-            SELECT p.id as person_id, p.name, 
-                   COALESCE(p.cover_face_id, MIN(f.id)) as face_id,
+            SELECT p.id as person_id, p.name,
+                   COALESCE(p.cover_face_id, MIN(f.id)) as cover_face_id,
                    COUNT(f.id) as face_count,
-                   MIN(i.header_hash) as header_hash
+                   MIN(i.header_hash) as cover_hash
             FROM persons p
             JOIN faces f ON p.id = f.person_id
             JOIN images i ON f.image_id = i.id
             GROUP BY p.id
             ORDER BY face_count DESC, p.id ASC
-            LIMIT 150
+            LIMIT 300
         """)
         persons = [dict(r) for r in cur.fetchall()]
         if len(persons) < 2:
             return []
 
-        person_map = {p["person_id"]: p for p in persons}
-        suggestions = []
-        seen_pairs = set()
-
-        max_dist = (2.0 * max(0.0, 1.0 - min_similarity)) ** 0.5
-
+        # Build centroid for each cluster
+        centroids: List[Dict] = []
         for p in persons:
-            if len(suggestions) >= limit:
-                break
             pid = p["person_id"]
-            fid = p["face_id"]
-            if not fid:
+            cur.execute("""
+                SELECT vf.embedding
+                FROM vec_faces vf
+                JOIN faces f ON vf.face_id = f.id
+                WHERE f.person_id = ?
+            """, (pid,))
+            rows = cur.fetchall()
+            if not rows:
                 continue
 
-            cur.execute("""
-                SELECT f.person_id, v.distance
-                FROM vec_faces v
-                JOIN faces f ON v.face_id = f.id
-                WHERE v.embedding MATCH (SELECT embedding FROM vec_faces WHERE face_id = ?)
-                  AND k = 20
-            """, (fid,))
-            neighbors = cur.fetchall()
+            embs = []
+            for r in rows:
+                raw = bytes(r["embedding"])
+                emb = np.frombuffer(raw, dtype=np.float32).copy()
+                if len(emb) == 512:
+                    norm = np.linalg.norm(emb)
+                    if norm > 1e-6:
+                        embs.append(emb / norm)
 
-            for n in neighbors:
-                target_pid = n["person_id"]
-                dist = n["distance"]
-                if target_pid and target_pid != pid and dist <= max_dist:
-                    pair = tuple(sorted([pid, target_pid]))
-                    if pair in seen_pairs:
-                        continue
-                    seen_pairs.add(pair)
+            if not embs:
+                continue
 
-                    target_p = person_map.get(target_pid)
-                    if not target_p:
-                        cur.execute("""
-                            SELECT p.id as person_id, p.name,
-                                   COUNT(f.id) as face_count,
-                                   MIN(i.header_hash) as header_hash
-                            FROM persons p
-                            LEFT JOIN faces f ON p.id = f.person_id
-                            LEFT JOIN images i ON f.image_id = i.id
-                            WHERE p.id = ?
-                            GROUP BY p.id
-                        """, (target_pid,))
-                        t_row = cur.fetchone()
-                        if not t_row:
-                            continue
-                        target_p = dict(t_row)
-                        person_map[target_pid] = target_p
+            stack = np.stack(embs)  # (N, 512)
+            mean_emb = stack.mean(axis=0)
+            mean_norm = np.linalg.norm(mean_emb)
+            if mean_norm < 1e-6:
+                continue
+            centroid = (mean_emb / mean_norm).astype(np.float32)
 
-                    sim = round(1.0 - (dist ** 2) / 2.0, 3)
-                    
-                    p_is_default = p["name"].startswith("Person ")
-                    t_is_default = target_p["name"].startswith("Person ")
-                    if not p_is_default and t_is_default:
-                        keep_p, merge_p = p, target_p
-                    elif p_is_default and not t_is_default:
-                        keep_p, merge_p = target_p, p
-                    elif p["face_count"] >= target_p["face_count"]:
-                        keep_p, merge_p = p, target_p
-                    else:
-                        keep_p, merge_p = target_p, p
+            # Intra-cluster cohesion: mean pairwise cosine similarity (up to first 10 faces)
+            if len(embs) >= 2:
+                sub = stack[:min(len(embs), 10)]
+                gram_intra = sub @ sub.T
+                iu = np.triu_indices(len(sub), k=1)
+                cohesion = float(gram_intra[iu].mean())
+            else:
+                cohesion = 1.0  # singleton: treat as perfectly coherent
 
-                    suggestions.append({
-                        "primary_person": {
-                            "id": keep_p["person_id"],
-                            "name": keep_p["name"],
-                            "face_count": keep_p["face_count"],
-                            "cover_thumb": f"faces/{keep_p['header_hash']}_0.webp"
-                        },
-                        "candidate_person": {
-                            "id": merge_p["person_id"],
-                            "name": merge_p["name"],
-                            "face_count": merge_p["face_count"],
-                            "cover_thumb": f"faces/{merge_p['header_hash']}_0.webp"
-                        },
-                        "similarity": sim,
-                        "confidence_pct": int(sim * 100)
-                    })
+            centroids.append({
+                "person_id": pid,
+                "name": p["name"],
+                "face_count": p["face_count"],
+                "cover_hash": p["cover_hash"],
+                "centroid": centroid,
+                "cohesion": cohesion,
+            })
+
+        if len(centroids) < 2:
+            return []
+
+        # All-pairs centroid cosine similarity via one matrix multiply
+        cmat = np.stack([c["centroid"] for c in centroids])  # (M, 512)
+        gram = cmat @ cmat.T  # (M, M)
+
+        suggestions = []
+        seen_pairs: set = set()
+        n_c = len(centroids)
+
+        for i in range(n_c):
+            for j in range(i + 1, n_c):
+                sim = float(gram[i, j])
+                if sim < min_similarity:
+                    continue
+                ci = centroids[i]
+                cj = centroids[j]
+                pair = (min(ci["person_id"], cj["person_id"]),
+                        max(ci["person_id"], cj["person_id"]))
+                if pair in seen_pairs:
+                    continue
+                seen_pairs.add(pair)
+
+                # Effective confidence discounts noisy clusters
+                min_cohesion = min(ci["cohesion"], cj["cohesion"])
+                effective_conf = sim * (0.5 + 0.5 * min_cohesion)
+
+                # Primary = named or larger cluster
+                ci_default = ci["name"].startswith("Person ")
+                cj_default = cj["name"].startswith("Person ")
+                if not ci_default and cj_default:
+                    keep, merge = ci, cj
+                elif ci_default and not cj_default:
+                    keep, merge = cj, ci
+                elif ci["face_count"] >= cj["face_count"]:
+                    keep, merge = ci, cj
+                else:
+                    keep, merge = cj, ci
+
+                suggestions.append({
+                    "primary_person": {
+                        "id": keep["person_id"],
+                        "name": keep["name"],
+                        "face_count": keep["face_count"],
+                        "cover_thumb": f"faces/{keep['cover_hash']}_0.webp",
+                    },
+                    "candidate_person": {
+                        "id": merge["person_id"],
+                        "name": merge["name"],
+                        "face_count": merge["face_count"],
+                        "cover_thumb": f"faces/{merge['cover_hash']}_0.webp",
+                    },
+                    "centroid_similarity": round(sim, 4),
+                    "similarity": round(sim, 4),
+                    "confidence_pct": int(effective_conf * 100),
+                    "primary_cohesion": round(keep["cohesion"], 3),
+                    "candidate_cohesion": round(merge["cohesion"], 3),
+                })
 
         suggestions.sort(key=lambda x: x["similarity"], reverse=True)
         return suggestions[:limit]

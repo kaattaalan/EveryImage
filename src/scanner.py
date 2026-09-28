@@ -509,3 +509,119 @@ class IndexingEngine:
             self.current_file = batch[-1].fpath.name
             elapsed_active = max(0.1, time.time() - self.indexing_start_time)
             self.speed_fps = round(self.session_tagged / elapsed_active, 1)
+
+class LibraryWatcher:
+    _instance = None
+    _lock = threading.RLock()
+
+    @classmethod
+    def get_instance(cls):
+        if cls._instance is None:
+            with cls._lock:
+                if cls._instance is None:
+                    cls._instance = cls()
+        return cls._instance
+
+    def __init__(self):
+        from watchdog.observers import Observer
+        from watchdog.events import FileSystemEventHandler
+
+        self.observer = Observer()
+        self.watched_paths = set()
+        self.active_watches = {}
+        self.is_running = False
+        self.lock = threading.RLock()
+        self.debounce_timer: Optional[threading.Timer] = None
+        self.pending_files = set()
+
+        outer = self
+        class Handler(FileSystemEventHandler):
+            def on_created(self, event):
+                if not event.is_directory:
+                    outer.handle_file_event(event.src_path)
+
+            def on_moved(self, event):
+                if not event.is_directory:
+                    outer.handle_file_event(event.dest_path)
+
+        self.handler = Handler()
+
+    def handle_file_event(self, path_str: str):
+        ext = os.path.splitext(path_str)[1].lower()
+        if ext in SUPPORTED_EXTS:
+            with self.lock:
+                self.pending_files.add(path_str)
+                if self.debounce_timer:
+                    self.debounce_timer.cancel()
+                self.debounce_timer = threading.Timer(2.0, self._trigger_scan)
+                self.debounce_timer.daemon = True
+                self.debounce_timer.start()
+
+    def _trigger_scan(self):
+        with self.lock:
+            self.pending_files.clear()
+        engine = IndexingEngine.get_instance()
+        with engine.lock:
+            if engine.state in ("idle", "completed", "stopped", "error"):
+                engine.start()
+
+    def start(self):
+        with self.lock:
+            if self.is_running:
+                return
+            from watchdog.observers import Observer
+            self.observer = Observer()
+            self.active_watches.clear()
+            self.watched_paths.clear()
+            self.sync_watched_paths()
+            self.observer.start()
+            self.is_running = True
+
+    def stop(self):
+        with self.lock:
+            if not self.is_running:
+                return
+            if self.debounce_timer:
+                self.debounce_timer.cancel()
+            try:
+                self.observer.stop()
+                self.observer.join(timeout=1.5)
+            except Exception:
+                pass
+            self.is_running = False
+
+    def sync_watched_paths(self):
+        with self.lock:
+            current_libs = db.get_libraries()
+            current_paths = {l["path"] for l in current_libs if Path(l["path"]).exists()}
+
+            # Remove watches for deleted libraries
+            for p in list(self.watched_paths):
+                if p not in current_paths:
+                    watch = self.active_watches.pop(p, None)
+                    if watch:
+                        try:
+                            self.observer.unschedule(watch)
+                        except Exception:
+                            pass
+                    self.watched_paths.remove(p)
+
+            # Add watches for new libraries
+            for p in current_paths:
+                if p not in self.watched_paths:
+                    try:
+                        watch = self.observer.schedule(self.handler, p, recursive=True)
+                        self.active_watches[p] = watch
+                        self.watched_paths.add(p)
+                    except Exception as e:
+                        import logging
+                        logging.getLogger("LibraryWatcher").warning(f"Could not watch directory {p}: {e}")
+
+    def get_status(self) -> Dict[str, Any]:
+        with self.lock:
+            return {
+                "active": self.is_running,
+                "watched_count": len(self.watched_paths),
+                "watched_paths": list(self.watched_paths)
+            }
+

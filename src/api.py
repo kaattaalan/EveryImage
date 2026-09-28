@@ -8,7 +8,9 @@ import os
 import subprocess
 import io
 import re
-from typing import List, Optional
+import calendar
+from datetime import datetime, timedelta
+from typing import List, Optional, Tuple
 import asyncio
 from pydantic import BaseModel
 from fastapi import FastAPI, HTTPException, Query, Response
@@ -20,9 +22,87 @@ import pillow_heif
 pillow_heif.register_heif_opener()
 
 import src.database as db
-from src.scanner import IndexingEngine
+from src.scanner import IndexingEngine, LibraryWatcher
 from src.models import SiglipEngine
 import contextlib
+
+def parse_natural_language_dates(query: str) -> Tuple[str, Optional[str], Optional[str], Optional[str]]:
+    """
+    Parses natural language date phrases from a query string.
+    Returns: (cleaned_query, from_date, to_date, explanation)
+    """
+    cleaned = query.strip()
+    from_date = None
+    to_date = None
+    explanation = None
+
+    now = datetime.now()
+    months = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december']
+
+    # 1. Month + Year: e.g. 'in August 2024', 'May 2023'
+    m_month_year = re.search(r'\b(?:in|during|from)?\s*(' + '|'.join(months) + r')\s+(20\d\d)\b', cleaned, re.IGNORECASE)
+    # 2. Specific Year: e.g. 'in 2024', 'from 2023', 'during 2022', or standalone '2024'
+    m_year = re.search(r'\b(?:in|from|during|year)?\s*(20\d\d)\b', cleaned, re.IGNORECASE)
+
+    if m_month_year:
+        mon_str = m_month_year.group(1).lower()
+        yr = int(m_month_year.group(2))
+        mon_idx = months.index(mon_str) + 1
+        num_days = calendar.monthrange(yr, mon_idx)[1]
+        from_date = f"{yr:04d}-{mon_idx:02d}-01 00:00:00"
+        to_date = f"{yr:04d}-{mon_idx:02d}-{num_days:02d} 23:59:59"
+        explanation = f"{mon_str.capitalize()} {yr}"
+        cleaned = cleaned[:m_month_year.start()] + " " + cleaned[m_month_year.end():]
+    elif m_year:
+        yr = int(m_year.group(1))
+        from_date = f"{yr:04d}-01-01 00:00:00"
+        to_date = f"{yr:04d}-12-31 23:59:59"
+        explanation = f"Year {yr}"
+        cleaned = cleaned[:m_year.start()] + " " + cleaned[m_year.end():]
+    elif re.search(r'\b(?:last|past)\s+year\b', cleaned, re.IGNORECASE):
+        m = re.search(r'\b(?:last|past)\s+year\b', cleaned, re.IGNORECASE)
+        prev_yr = now.year - 1
+        from_date = f"{prev_yr:04d}-01-01 00:00:00"
+        to_date = f"{prev_yr:04d}-12-31 23:59:59"
+        explanation = f"Last Year ({prev_yr})"
+        cleaned = cleaned[:m.start()] + " " + cleaned[m.end():]
+    elif re.search(r'\bthis\s+year\b', cleaned, re.IGNORECASE):
+        m = re.search(r'\bthis\s+year\b', cleaned, re.IGNORECASE)
+        from_date = f"{now.year:04d}-01-01 00:00:00"
+        to_date = f"{now.year:04d}-12-31 23:59:59"
+        explanation = f"This Year ({now.year})"
+        cleaned = cleaned[:m.start()] + " " + cleaned[m.end():]
+    elif re.search(r'\b(?:last|past)\s+month\b', cleaned, re.IGNORECASE):
+        m = re.search(r'\b(?:last|past)\s+month\b', cleaned, re.IGNORECASE)
+        first_this_month = now.replace(day=1)
+        last_month_end = first_this_month - timedelta(days=1)
+        prev_yr = last_month_end.year
+        prev_mon = last_month_end.month
+        num_days = calendar.monthrange(prev_yr, prev_mon)[1]
+        from_date = f"{prev_yr:04d}-{prev_mon:02d}-01 00:00:00"
+        to_date = f"{prev_yr:04d}-{prev_mon:02d}-{num_days:02d} 23:59:59"
+        explanation = f"Last Month ({months[prev_mon-1].capitalize()} {prev_yr})"
+        cleaned = cleaned[:m.start()] + " " + cleaned[m.end():]
+    elif re.search(r'\byesterday\b', cleaned, re.IGNORECASE):
+        m = re.search(r'\byesterday\b', cleaned, re.IGNORECASE)
+        yest = now - timedelta(days=1)
+        from_date = f"{yest.year:04d}-{yest.month:02d}-{yest.day:02d} 00:00:00"
+        to_date = f"{yest.year:04d}-{yest.month:02d}-{yest.day:02d} 23:59:59"
+        explanation = "Yesterday"
+        cleaned = cleaned[:m.start()] + " " + cleaned[m.end():]
+    elif re.search(r'\btoday\b', cleaned, re.IGNORECASE):
+        m = re.search(r'\btoday\b', cleaned, re.IGNORECASE)
+        from_date = f"{now.year:04d}-{now.month:02d}-{now.day:02d} 00:00:00"
+        to_date = f"{now.year:04d}-{now.month:02d}-{now.day:02d} 23:59:59"
+        explanation = "Today"
+        cleaned = cleaned[:m.start()] + " " + cleaned[m.end():]
+
+    # Clean up trailing/leading prepositions
+    cleaned = re.sub(r'\b(?:in|from|during|at|on)\b\s*$', '', cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r'^\s*\b(?:in|from|during|at|on)\b', '', cleaned, flags=re.IGNORECASE).strip()
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
+    return cleaned, from_date, to_date, explanation
 
 app = FastAPI(title="EveryImage Desktop API", version="1.0.0")
 
@@ -34,10 +114,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize DB on startup
+# Initialize DB and start Watchdog on startup
 @app.on_event("startup")
 def startup_event():
     db.init_db()
+    try:
+        LibraryWatcher.get_instance().start()
+    except Exception:
+        pass
 
 # Mount thumbnails folder
 app.mount("/thumbnails", StaticFiles(directory=str(cfg.CACHE_THUMBNAILS)), name="thumbnails")
@@ -110,6 +194,10 @@ def add_library(req: AddLibraryRequest):
     if not p.exists() or not p.is_dir():
         raise HTTPException(status_code=400, detail="Provided path does not exist or is not a directory")
     res = db.add_library(str(p))
+    try:
+        LibraryWatcher.get_instance().sync_watched_paths()
+    except Exception:
+        pass
     return res
 
 @app.get("/api/gallery")
@@ -130,6 +218,10 @@ def get_timeline(library_id: Optional[int] = None):
 def delete_library(lib_id: int):
     db.remove_library(lib_id)
     db.cleanup_orphan_persons()
+    try:
+        LibraryWatcher.get_instance().sync_watched_paths()
+    except Exception:
+        pass
     return {"status": "deleted"}
 
 @app.get("/api/faces/persons")
@@ -184,7 +276,16 @@ def search(
     min_size_kb: Optional[int] = Query(None)
 ):
     raw_query = q.strip()
-    
+
+    # Natural Language Date Extraction if from_date / to_date not provided explicitly
+    parsed_date_label = None
+    if not from_date and not to_date:
+        parsed_q, nl_from, nl_to, parsed_date_label = parse_natural_language_dates(raw_query)
+        if nl_from or nl_to:
+            raw_query = parsed_q if parsed_q else raw_query
+            from_date = nl_from
+            to_date = nl_to
+
     # 1. Parse negative quoted terms: e.g. -"shawaya"
     neg_quoted_terms = [t.strip() for t in re.findall(r'-"([^"]+)"', raw_query) if t.strip()]
 
@@ -232,6 +333,7 @@ def search(
             "matched_person": None,
             "scene_prompt": None,
             "negative_prompt": None,
+            "parsed_date_filter": parsed_date_label,
             "is_person_only": False,
             "ocr_only": True,
             "ocr_matches_count": len(ocr_results),
@@ -460,11 +562,52 @@ def search(
         "matched_person": matched_person["name"] if matched_person else None,
         "scene_prompt": remaining_scene_prompt,
         "negative_prompt": combined_negative if combined_negative else None,
+        "parsed_date_filter": parsed_date_label,
         "is_person_only": False,
         "ocr_matches_count": len(matches) if quoted_terms else 0,
         "total_matches": len(matches),
         "results": matches
     }
+
+@app.get("/api/duplicates")
+def get_duplicates(
+    similarity_threshold: float = Query(0.95, ge=0.50, le=1.00),
+    limit: int = Query(50, ge=1, le=200)
+):
+    groups = db.get_duplicate_groups(similarity_threshold=similarity_threshold, limit=limit)
+    total_savings = sum(g["potential_savings_bytes"] for g in groups)
+    return {
+        "groups": groups,
+        "total_groups": len(groups),
+        "total_duplicate_images": sum(len(g["images"]) for g in groups),
+        "potential_savings_bytes": total_savings,
+        "potential_savings_mb": round(total_savings / (1024 * 1024), 2)
+    }
+
+@app.get("/api/faces/merge-suggestions")
+def get_merge_suggestions(
+    min_similarity: float = Query(0.65, ge=0.40, le=0.99),
+    limit: int = Query(40, ge=1, le=100)
+):
+    suggestions = db.get_face_merge_suggestions(min_similarity=min_similarity, limit=limit)
+    return {
+        "suggestions": suggestions,
+        "total": len(suggestions)
+    }
+
+@app.get("/api/watcher/status")
+def get_watcher_status():
+    return LibraryWatcher.get_instance().get_status()
+
+@app.post("/api/watcher/start")
+def start_watcher():
+    LibraryWatcher.get_instance().start()
+    return LibraryWatcher.get_instance().get_status()
+
+@app.post("/api/watcher/stop")
+def stop_watcher():
+    LibraryWatcher.get_instance().stop()
+    return LibraryWatcher.get_instance().get_status()
 
 @app.get("/api/tags/suggestions")
 def get_tag_suggestions():

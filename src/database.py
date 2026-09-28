@@ -847,3 +847,225 @@ def get_stats() -> Dict[str, Any]:
         "total_persons": total_persons,
         "total_libraries": total_libraries
     }
+
+def get_duplicate_groups(similarity_threshold: float = 0.96, limit: int = 50) -> List[Dict[str, Any]]:
+    """
+    Returns groups of identical or near-duplicate images.
+    Combines exact header/hash matches (100% identical) and SigLIP-2 vector similarity (bursts/re-encodes).
+    """
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        duplicate_groups = []
+        seen_image_ids = set()
+
+        # 1. Exact hash duplicates (100% duplicate content)
+        cur.execute("""
+            SELECT header_hash, COUNT(*) as cnt
+            FROM images
+            GROUP BY header_hash
+            HAVING cnt > 1
+            LIMIT ?
+        """, (limit,))
+        exact_hashes = [r["header_hash"] for r in cur.fetchall()]
+
+        for hhash in exact_hashes:
+            cur.execute("""
+                SELECT id, library_id, file_path, file_name, file_size, width, height, header_hash, captured_at
+                FROM images
+                WHERE header_hash = ?
+                ORDER BY id ASC
+            """, (hhash,))
+            imgs = [dict(r) for r in cur.fetchall()]
+            if len(imgs) > 1:
+                duplicate_groups.append({
+                    "group_id": f"exact_{hhash[:12]}",
+                    "type": "exact",
+                    "similarity": 1.0,
+                    "confidence_pct": 100,
+                    "potential_savings_bytes": sum(img["file_size"] for img in imgs[1:]),
+                    "images": imgs
+                })
+                for img in imgs:
+                    seen_image_ids.add(img["id"])
+
+        if len(duplicate_groups) >= limit:
+            return duplicate_groups[:limit]
+
+        # 2. Near-duplicates via SigLIP-2 vector distance (burst photos / crops / resized)
+        max_dist = (2.0 * max(0.0, 1.0 - similarity_threshold)) ** 0.5
+
+        cur.execute("""
+            SELECT id, library_id, file_path, file_name, file_size, width, height, header_hash, captured_at
+            FROM images
+            WHERE has_embedding = 1
+            ORDER BY captured_at DESC, id DESC
+            LIMIT 400
+        """)
+        candidates = [dict(r) for r in cur.fetchall()]
+        candidate_map = {img["id"]: img for img in candidates}
+
+        for img in candidates:
+            if len(duplicate_groups) >= limit:
+                break
+            iid = img["id"]
+            if iid in seen_image_ids:
+                continue
+
+            cur.execute("""
+                SELECT image_id, distance
+                FROM vec_images
+                WHERE embedding MATCH (SELECT embedding FROM vec_images WHERE image_id = ?)
+                  AND k = 4
+            """, (iid,))
+            neighbors = cur.fetchall()
+
+            cluster_imgs = [img]
+            best_sim = 1.0
+            for n in neighbors:
+                nid = n["image_id"]
+                dist = n["distance"]
+                if nid != iid and dist <= max_dist and nid not in seen_image_ids:
+                    if nid in candidate_map:
+                        n_img = candidate_map[nid]
+                    else:
+                        cur.execute("""
+                            SELECT id, library_id, file_path, file_name, file_size, width, height, header_hash, captured_at
+                            FROM images WHERE id = ?
+                        """, (nid,))
+                        n_row = cur.fetchone()
+                        if not n_row:
+                            continue
+                        n_img = dict(n_row)
+                        candidate_map[nid] = n_img
+
+                    sim = round(1.0 - (dist ** 2) / 2.0, 3)
+                    best_sim = min(best_sim, sim)
+                    cluster_imgs.append(n_img)
+                    seen_image_ids.add(nid)
+
+            if len(cluster_imgs) > 1:
+                seen_image_ids.add(iid)
+                cluster_imgs.sort(key=lambda x: x["file_size"], reverse=True)
+                duplicate_groups.append({
+                    "group_id": f"near_{iid}",
+                    "type": "near_duplicate",
+                    "similarity": round(best_sim, 3),
+                    "confidence_pct": int(best_sim * 100),
+                    "potential_savings_bytes": sum(x["file_size"] for x in cluster_imgs[1:]),
+                    "images": cluster_imgs
+                })
+
+        return duplicate_groups[:limit]
+    finally:
+        conn.close()
+
+def get_face_merge_suggestions(min_similarity: float = 0.65, limit: int = 50) -> List[Dict[str, Any]]:
+    """
+    Computes ArcFace embedding similarity between representative faces of distinct person clusters.
+    Returns suggested person merges above min_similarity.
+    """
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT p.id as person_id, p.name, 
+                   COALESCE(p.cover_face_id, MIN(f.id)) as face_id,
+                   COUNT(f.id) as face_count,
+                   MIN(i.header_hash) as header_hash
+            FROM persons p
+            JOIN faces f ON p.id = f.person_id
+            JOIN images i ON f.image_id = i.id
+            GROUP BY p.id
+            ORDER BY face_count DESC, p.id ASC
+            LIMIT 150
+        """)
+        persons = [dict(r) for r in cur.fetchall()]
+        if len(persons) < 2:
+            return []
+
+        person_map = {p["person_id"]: p for p in persons}
+        suggestions = []
+        seen_pairs = set()
+
+        max_dist = (2.0 * max(0.0, 1.0 - min_similarity)) ** 0.5
+
+        for p in persons:
+            if len(suggestions) >= limit:
+                break
+            pid = p["person_id"]
+            fid = p["face_id"]
+            if not fid:
+                continue
+
+            cur.execute("""
+                SELECT f.person_id, v.distance
+                FROM vec_faces v
+                JOIN faces f ON v.face_id = f.id
+                WHERE v.embedding MATCH (SELECT embedding FROM vec_faces WHERE face_id = ?)
+                  AND k = 20
+            """, (fid,))
+            neighbors = cur.fetchall()
+
+            for n in neighbors:
+                target_pid = n["person_id"]
+                dist = n["distance"]
+                if target_pid and target_pid != pid and dist <= max_dist:
+                    pair = tuple(sorted([pid, target_pid]))
+                    if pair in seen_pairs:
+                        continue
+                    seen_pairs.add(pair)
+
+                    target_p = person_map.get(target_pid)
+                    if not target_p:
+                        cur.execute("""
+                            SELECT p.id as person_id, p.name,
+                                   COUNT(f.id) as face_count,
+                                   MIN(i.header_hash) as header_hash
+                            FROM persons p
+                            LEFT JOIN faces f ON p.id = f.person_id
+                            LEFT JOIN images i ON f.image_id = i.id
+                            WHERE p.id = ?
+                            GROUP BY p.id
+                        """, (target_pid,))
+                        t_row = cur.fetchone()
+                        if not t_row:
+                            continue
+                        target_p = dict(t_row)
+                        person_map[target_pid] = target_p
+
+                    sim = round(1.0 - (dist ** 2) / 2.0, 3)
+                    
+                    p_is_default = p["name"].startswith("Person ")
+                    t_is_default = target_p["name"].startswith("Person ")
+                    if not p_is_default and t_is_default:
+                        keep_p, merge_p = p, target_p
+                    elif p_is_default and not t_is_default:
+                        keep_p, merge_p = target_p, p
+                    elif p["face_count"] >= target_p["face_count"]:
+                        keep_p, merge_p = p, target_p
+                    else:
+                        keep_p, merge_p = target_p, p
+
+                    suggestions.append({
+                        "primary_person": {
+                            "id": keep_p["person_id"],
+                            "name": keep_p["name"],
+                            "face_count": keep_p["face_count"],
+                            "cover_thumb": f"faces/{keep_p['header_hash']}_0.webp"
+                        },
+                        "candidate_person": {
+                            "id": merge_p["person_id"],
+                            "name": merge_p["name"],
+                            "face_count": merge_p["face_count"],
+                            "cover_thumb": f"faces/{merge_p['header_hash']}_0.webp"
+                        },
+                        "similarity": sim,
+                        "confidence_pct": int(sim * 100)
+                    })
+
+        suggestions.sort(key=lambda x: x["similarity"], reverse=True)
+        return suggestions[:limit]
+    finally:
+        conn.close()
+

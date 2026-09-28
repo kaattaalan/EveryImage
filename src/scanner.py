@@ -444,17 +444,13 @@ class IndexingEngine:
         tensors = [it.siglip_tensor for it in batch]
         embeddings = siglip.encode_tensors_batch(tensors)
 
-        # 2. Gated GPU OCR (DirectML)
-        # Uses SigLIP text gate to skip RapidOCR on ~80% of photos that contain no text,
-        # saving 83ms per image and doubling overall indexing throughput.
+        # 2. GPU Accelerated OCR (RapidOCR on DirectML - scans all images without missing signs, menus, or bills)
         ocr_engine = OcrEngine.get_instance()
         batch_ocr_text = []
-        for idx, it in enumerate(batch):
-            if siglip.is_text_candidate(embeddings[idx], threshold=0.075):
-                txt = ocr_engine.extract_text(it.bgr_1280)
-            else:
-                txt = ""
+        for it in batch:
+            txt = ocr_engine.extract_text(it.bgr_1280)
             batch_ocr_text.append(txt)
+
 
 
         # 3. GPU Face Detection (DirectML - Optimized detection + recognition only)

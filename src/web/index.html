@@ -998,6 +998,7 @@ header {
                  oninput="document.getElementById('mergeThresholdLabel').textContent = parseFloat(this.value).toFixed(2); loadMergeSuggestions()">
           <span id="mergeThresholdLabel" style="font-size: 12px; font-weight: 700; color: var(--accent); min-width: 40px;">0.86</span>
           <button class="btn btn-primary" onclick="loadMergeSuggestions()">Refresh</button>
+          <button class="btn" style="font-size: 11px; padding: 4px 8px; color: var(--text-muted); border-color: var(--border);" title="Clear all recorded rejections and reset active learning" onclick="resetFaceLearning()">Reset Learning</button>
         </div>
       </div>
       <div id="mergeSummaryBar" style="display: none; background: rgba(56,189,248,0.1); border: 1px solid rgba(56,189,248,0.35); border-radius: 8px; padding: 10px 16px; margin-bottom: 16px; font-size: 13px; color: var(--accent); font-weight: 600;"></div>
@@ -1960,11 +1961,67 @@ async function loadMergeSuggestions() {
             </div>
           </div>
           <div class="merge-confidence" title="${detailTitle}">${s.confidence_pct}% Match</div>
-          <button class="btn btn-primary merge-btn" onclick="quickMergeSuggestion(${primary.id}, ${candidate.id}, '${primary.name.replace(/'/g, "\'")}')">Merge</button>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <button class="btn btn-primary merge-btn" onclick="quickMergeSuggestion(${primary.id}, ${candidate.id}, '${primary.name.replace(/'/g, "\'")}')">Merge</button>
+            <button class="btn merge-ignore-btn" style="font-size: 11px; padding: 4px 8px; color: var(--text-muted); border: 1px solid var(--border);" title="Teach model that these are different people" onclick="quickIgnoreSuggestion(${primary.id}, ${candidate.id}, this)">Ignore</button>
+          </div>
         </div>`;
     }).join('');
   } catch (e) {
     list.innerHTML = `<div style="color:var(--danger);">Error loading merge suggestions: ${e.message}</div>`;
+  }
+}
+
+async function quickIgnoreSuggestion(p1, p2, btnEl) {
+  const row = btnEl.closest('.merge-suggestion-row');
+  if (row) {
+    row.style.opacity = '0.3';
+    row.style.pointerEvents = 'none';
+  }
+  try {
+    const res = await fetch('/api/faces/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ person_id_1: p1, person_id_2: p2, action: 'ignore' })
+    });
+    if (!res.ok) {
+      if (row) { row.style.opacity = '1'; row.style.pointerEvents = 'auto'; }
+      showToast('Feedback recording failed', 'error');
+      return;
+    }
+    showToast('Learned: this pair will never be suggested again.', 'info');
+    if (row) {
+      row.style.transition = 'all 0.25s ease';
+      row.style.transform = 'translateX(20px)';
+      row.style.opacity = '0';
+      setTimeout(() => {
+        row.remove();
+        const list = document.getElementById('mergeSuggestionsList');
+        const badge = document.getElementById('optMergeBadge');
+        if (list) {
+          const remaining = list.querySelectorAll('.merge-suggestion-row').length;
+          if (badge) badge.textContent = remaining;
+          if (remaining === 0) {
+            list.innerHTML = '<div style="padding:40px; text-align:center; color:var(--text-muted);">All current suggestions reviewed.</div>';
+          }
+        }
+      }, 250);
+    }
+  } catch (e) {
+    showToast('Feedback error: ' + e.message, 'error');
+  }
+}
+
+async function resetFaceLearning() {
+  if (!confirm('Reset all learned face rejections? Previously ignored suggestions may reappear.')) return;
+  try {
+    const res = await fetch('/api/faces/feedback/reset', { method: 'POST' });
+    if (res.ok) {
+      showToast('Face learning constraints reset', 'info');
+      loadMergeSuggestions();
+    }
+  } catch (e) {
+    showToast('Reset error: ' + e.message, 'error');
   }
 }
 

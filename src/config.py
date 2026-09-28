@@ -38,3 +38,7 @@ os.environ["INSIGHTFACE_HOME"] = str(MODELS_INSIGHTFACE)
 
 import tempfile
 tempfile.tempdir = str(CACHE_TEMP)
+
+# Feature flags: Set to False to completely bypass learning layer and use raw baseline
+ENABLE_FACE_LEARNER = True
+

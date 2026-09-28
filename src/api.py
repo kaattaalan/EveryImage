@@ -261,6 +261,14 @@ def merge_persons(req: MergePersonsRequest):
         raise HTTPException(status_code=400, detail="No distinct source persons to merge")
     db.merge_persons(req.target_id, req.source_ids)
     db.cleanup_orphan_persons()
+    if cfg.ENABLE_FACE_LEARNER:
+        try:
+            from src.face_learner import FaceLearner
+            learner = FaceLearner.get_instance()
+            for sid in req.source_ids:
+                learner.record_feedback(req.target_id, sid, action="merge")
+        except Exception:
+            pass
     return {"status": "merged", "target_id": req.target_id}
 
 @app.get("/api/search")
@@ -584,18 +592,62 @@ def get_duplicates(
         "potential_savings_mb": round(total_savings / (1024 * 1024), 2)
     }
 
+class FaceFeedbackRequest(BaseModel):
+    person_id_1: int
+    person_id_2: int
+    action: str  # "ignore" (reject) or "merge" (confirm)
+
 @app.get("/api/faces/merge-suggestions")
 def get_merge_suggestions(
     min_similarity: float = Query(0.86, ge=0.50, le=0.99),
     limit: int = Query(40, ge=1, le=100)
 ):
     suggestions = db.get_face_merge_suggestions_centroid(min_similarity=min_similarity, limit=limit)
+    if cfg.ENABLE_FACE_LEARNER:
+        try:
+            from src.face_learner import FaceLearner
+            suggestions = FaceLearner.get_instance().filter_suggestions(suggestions)
+        except Exception:
+            pass
     return {
         "suggestions": suggestions,
         "total": len(suggestions),
-        "algorithm": "multimetric_centroid_genderage",
+        "algorithm": "multimetric_centroid_genderage_learned" if cfg.ENABLE_FACE_LEARNER else "multimetric_centroid_genderage",
         "threshold": min_similarity
     }
+
+@app.post("/api/faces/feedback")
+def record_face_feedback(req: FaceFeedbackRequest):
+    if not cfg.ENABLE_FACE_LEARNER:
+        return {"status": "disabled"}
+    try:
+        from src.face_learner import FaceLearner
+        success = FaceLearner.get_instance().record_feedback(req.person_id_1, req.person_id_2, req.action)
+        return {"status": "recorded" if success else "failed", "action": req.action}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+@app.get("/api/faces/feedback/stats")
+def get_feedback_stats():
+    if not cfg.ENABLE_FACE_LEARNER:
+        return {"enabled": False}
+    try:
+        from src.face_learner import FaceLearner
+        return FaceLearner.get_instance().get_stats()
+    except Exception as e:
+        return {"enabled": False, "error": str(e)}
+
+@app.post("/api/faces/feedback/reset")
+def reset_feedback():
+    if not cfg.ENABLE_FACE_LEARNER:
+        return {"status": "disabled"}
+    try:
+        from src.face_learner import FaceLearner
+        success = FaceLearner.get_instance().reset()
+        return {"status": "reset" if success else "failed"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
 
 
 @app.get("/api/watcher/status")
